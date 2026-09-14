@@ -1,0 +1,62 @@
+name: refresh
+
+on:
+  schedule:
+    - cron: "0 9 1 * *"   # 09:00 UTC on the 1st of each month
+  workflow_dispatch:       # and a manual "Run workflow" button
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install poppler (pdftotext)
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      # PDFs stay out of git. The cache carries them between runs so we only
+      # ever download what is new. Keyed on the manifest so a changed manifest
+      # still restores the previous cache and fetches the delta.
+      - name: Restore PDF cache
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: ardot-pdfs-${{ hashFiles('data/manifest.csv') }}
+          restore-keys: ardot-pdfs-
+
+      - name: Harvest index
+        run: python src/harvest.py
+
+      - name: Fetch new PDFs
+        run: python src/fetch.py
+
+      - name: Parse
+        run: python src/parse.py
+
+      - name: Commit derived data
+        run: |
+          git config user.name  "ardot-bot"
+          git config user.email "actions@github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "no changes"
+          else
+            git commit -m "refresh: $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Upload review queue as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-queue
+          path: data/review_queue.csv
