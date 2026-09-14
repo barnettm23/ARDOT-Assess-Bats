@@ -20,7 +20,7 @@ import subprocess
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 PDF_DIR = ROOT / "cache" / "pdf"
 TXT_DIR = ROOT / "cache" / "txt"
 MANIFEST = ROOT / "data" / "manifest.csv"

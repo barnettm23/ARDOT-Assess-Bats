@@ -15,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 MANIFEST = ROOT / "data" / "manifest.csv"
 PDF_DIR = ROOT / "cache" / "pdf"
 USER_AGENT = "OzarkBioacoustics-research/0.1 (contact: you@example.com)"

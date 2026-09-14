@@ -2,8 +2,13 @@ name: refresh
 
 on:
   schedule:
-    - cron: "0 9 1 * *"   # 09:00 UTC on the 1st of each month
-  workflow_dispatch:       # and a manual "Run workflow" button
+    - cron: "0 9 1 * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max PDFs to fetch (blank = all)"
+        required: false
+        default: "10"
 
 permissions:
   contents: write
@@ -24,9 +29,6 @@ jobs:
       - name: Install Python deps
         run: pip install -r requirements.txt
 
-      # PDFs stay out of git. The cache carries them between runs so we only
-      # ever download what is new. Keyed on the manifest so a changed manifest
-      # still restores the previous cache and fetches the delta.
       - name: Restore PDF cache
         uses: actions/cache@v4
         with:
@@ -35,13 +37,13 @@ jobs:
           restore-keys: ardot-pdfs-
 
       - name: Harvest index
-        run: python src/harvest.py
+        run: python harvest.py
 
       - name: Fetch new PDFs
-        run: python src/fetch.py
+        run: python fetch.py ${{ github.event.inputs.limit }}
 
       - name: Parse
-        run: python src/parse.py
+        run: python parse.py
 
       - name: Commit derived data
         run: |
@@ -49,14 +51,16 @@ jobs:
           git config user.email "actions@github.com"
           git add data/
           if git diff --staged --quiet; then
-            echo "no changes"
+            echo "no changes to commit"
           else
             git commit -m "refresh: $(date -u +%Y-%m-%d)"
             git push
           fi
 
-      - name: Upload review queue as artifact
+      - name: Upload review queue
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: review-queue
           path: data/review_queue.csv
+          if-no-files-found: warn
