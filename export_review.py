@@ -47,6 +47,27 @@ HAND_FIELDS = [
 SAMPLE_N = 15
 SEED = 20260914  # fixed so the same 15 documents come back on a re-run
 
+# Written as numbers rather than text so the sheet sorts, filters and
+# aggregates correctly -- MIN/MAX over text-formatted years returns 0.
+NUMERIC = {
+    "doc_year",
+    "ce_tier",
+    "project_length_mi",
+    "n_bats_listed",
+    "any_bat_LAA",
+    "acres_cleared",
+    "mitigation_usd",
+}
+
+
+def typed(field: str, value: str):
+    if field not in NUMERIC or value in ("", None):
+        return value
+    try:
+        return float(value) if "." in value else int(value)
+    except (TypeError, ValueError):
+        return value  # leave anything unparseable visible rather than dropping it
+
 
 def read(path: Path) -> list[dict]:
     if not path.exists():
@@ -79,7 +100,7 @@ def sheet_records(wb, records: list[dict]) -> None:
     cols = list(records[0].keys())
     ws.append(cols)
     for r in records:
-        ws.append([r.get(c, "") for c in cols])
+        ws.append([typed(c, r.get(c, "")) for c in cols])
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.font = Font(name=FONT)
@@ -167,11 +188,17 @@ def sheet_handcode(wb, records: list[dict]) -> None:
         a2 = f"{get_column_letter(first_actual + n_parsed - 1)}{r}"
         p1 = f"{get_column_letter(first_parsed)}{r}"
         p2 = f"{get_column_letter(first_parsed + n_parsed - 1)}{r}"
+        # Compare as text on both sides. Excel stores a typed "2022" as the
+        # number 2022, and 2022="2022" is FALSE -- without this, a reviewer who
+        # types the right answer gets scored as disagreeing.
         ws.cell(row=r, column=checked_col, value=f'=SUMPRODUCT(--({a1}:{a2}<>""))')
         ws.cell(
             row=r,
             column=agree_col,
-            value=f'=SUMPRODUCT(--({a1}:{a2}<>""),--({a1}:{a2}={p1}:{p2}))',
+            value=(
+                f'=SUMPRODUCT(--({a1}:{a2}<>""),'
+                f'--(TRIM({a1}:{a2}&"")=TRIM({p1}:{p2}&"")))'
+            ),
         )
         for c in range(1, agree_col + 1):
             cell = ws.cell(row=r, column=c)
