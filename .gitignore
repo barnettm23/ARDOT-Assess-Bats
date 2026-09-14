@@ -2,3 +2,9 @@ cache/
 __pycache__/
 *.pyc
 .venv/
+
+# Derived from the committed CSVs by export_review.py, and regenerated on
+# demand. Committing it would add a binary diff on every refresh and would go
+# stale against records.csv the moment the pipeline runs again. The CSVs are
+# the artefact of record; the workbook is a view of them.
+data/review_workbook.xlsx
