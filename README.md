@@ -23,9 +23,9 @@ media.ark.org.
 ## Pipeline
 
 ```
-python src/harvest.py   # index -> data/manifest.csv
-python src/fetch.py     # manifest -> cache/pdf/  (1 req/sec, cached)
-python src/parse.py     # PDFs -> data/records.csv + data/review_queue.csv
+python harvest.py     # index -> data/manifest.csv
+python fetch.py 10    # manifest -> cache/pdf/  (1 req/sec, cached; limit arg)
+python parse.py       # PDFs -> data/records.csv + data/review_queue.csv
 ```
 
 Everything is idempotent. Re-running fetches only what is new.
