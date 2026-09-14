@@ -33,12 +33,30 @@ jobs:
       - name: Install Python deps
         run: pip install -r requirements.txt
 
+      # The PDF cache is what keeps us off ARDOT's server. Getting the key
+      # wrong is not a performance problem, it is an etiquette problem.
+      #
+      # The old key was ardot-pdfs-${{ hashFiles('data/manifest.csv') }} with
+      # restore-keys: ardot-pdfs-. On the very first run no manifest existed
+      # yet, hashFiles returned empty, and the cache was saved under the bare
+      # key "ardot-pdfs-". That is an EXACT match for the restore-key, and an
+      # exact restore-key match beats every prefix match -- so that first
+      # 10-PDF cache permanently shadowed every later one. Four runs in a row
+      # restored those same 10 PDFs and re-downloaded everything else.
+      #
+      # Keying on the manifest was wrong anyway: fetch.py rewrites it with new
+      # sha256 values, so the key never matches on the next run by construction.
+      #
+      # github.run_id is never empty and never repeats, so no cache can collide
+      # with the restore-key prefix again. Each run saves a fresh cache and
+      # restores the most recent one. The v2 prefix sidesteps the poisoned
+      # ardot-pdfs- entry without needing to delete it.
       - name: Restore PDF cache
         uses: actions/cache@v4
         with:
           path: cache
-          key: ardot-pdfs-${{ hashFiles('data/manifest.csv') }}
-          restore-keys: ardot-pdfs-
+          key: ardot-pdf-cache-v2-${{ github.run_id }}
+          restore-keys: ardot-pdf-cache-v2-
 
       - name: Harvest index
         run: python harvest.py
