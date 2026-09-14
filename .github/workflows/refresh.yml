@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: "Max PDFs to fetch (blank = all)"
+        description: "Max PDFs to fetch (0 = no limit, full harvest)"
         required: false
         default: "10"
 
@@ -39,8 +39,25 @@ jobs:
       - name: Harvest index
         run: python harvest.py
 
+      # On a schedule event github.event.inputs is null, so interpolating it
+      # directly yielded a bare `python fetch.py` -- an unbounded ~700-document
+      # fetch, unattended, against a small state agency. The cap below applies
+      # whenever no limit was supplied. Raise it once a sample has been
+      # hand-checked per the validation gate in CLAUDE.md; dispatch with 0 for
+      # a deliberate full harvest.
       - name: Fetch new PDFs
-        run: python fetch.py ${{ github.event.inputs.limit }}
+        env:
+          DISPATCH_LIMIT: ${{ github.event.inputs.limit }}
+          SCHEDULED_LIMIT: "25"
+        run: |
+          LIMIT="${DISPATCH_LIMIT:-$SCHEDULED_LIMIT}"
+          if [ "$LIMIT" = "0" ]; then
+            echo "limit=0 -- full harvest"
+            python fetch.py
+          else
+            echo "limit=$LIMIT"
+            python fetch.py "$LIMIT"
+          fi
 
       - name: Parse
         run: python parse.py

@@ -51,6 +51,9 @@ RE_JOB = re.compile(r"\b(?:ARDOT\s+)?JOB\s*#?\s*([A-Z0-9]{6})\b", re.I)
 RE_FAP = re.compile(r"\bFAP\s+([A-Z0-9\-()\s]{6,30}?)(?:\s{2,}|\n)", re.I)
 RE_COUNTY = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+County\b")
 RE_DATE = re.compile(rf"\b({MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})\b")
+# Tier 3 cover pages carry a month and year with no day ("July 2022", job
+# 050475). Fallback only: the full date above wins wherever a document has one.
+RE_DATE_MY = re.compile(rf"\b({MONTHS})\s+(\d{{4}})\b")
 RE_TIER = re.compile(r"Tier\s+([123])\s+Categorical\s+Exclusion", re.I)
 RE_ACRES = re.compile(
     r"(?:suitable\s+(?:\w+\s+)?habitat\s+clearing[^.]{0,80}?totals?|"
@@ -167,6 +170,11 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
     if m := RE_DATE.search(body):
         rec.doc_date = f"{m.group(1)} {m.group(2)}, {m.group(3)}"
         rec.doc_year = m.group(3)
+    elif m := RE_DATE_MY.search(body):
+        # doc_year is what the annual series needs, and it is unambiguous here.
+        # doc_date carries the lower precision plainly rather than inventing a day.
+        rec.doc_date = f"{m.group(1)} {m.group(2)}"
+        rec.doc_year = m.group(2)
     else:
         notes.append("no-date")
 
