@@ -25,7 +25,7 @@ INDEX_URL = (
     "https://ardot.gov/divisions/program-management/construction-contract-development/"
     "construction-contractors/additional-project-information-2/environmental-documents/"
 )
-USER_AGENT = "OzarkBioacoustics-research/0.1 (contact: you@example.com)"
+USER_AGENT = "OzarkBioacoustics-research/0.1 (contact: michael@seismicagency.com)"
 ROOT = Path(__file__).resolve().parent
 MANIFEST = ROOT / "data" / "manifest.csv"
 
