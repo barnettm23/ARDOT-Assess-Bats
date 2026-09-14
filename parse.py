@@ -68,6 +68,61 @@ RE_PUPSEASON = re.compile(
 )
 RE_LENGTH = re.compile(r"project\s+length\s+is\s+([\d.]+)\s+mile", re.I)
 
+# --- Financial and demand signals -------------------------------------------
+#
+# What an ARDOT environmental CE actually states about money is not yet
+# established -- these documents are written for NEPA compliance, not costing,
+# so a total project cost may or may not appear. RE_DOLLAR_CONTEXT is the
+# honest answer to that: every dollar figure in the trimmed body is captured
+# with its surrounding words and queued, so one full run reports what phrasing
+# exists instead of us guessing. Refine the targeted patterns from that
+# evidence, then re-parse -- re-parsing costs ARDOT nothing once the PDFs are
+# cached.
+RE_PROJECT_COST = re.compile(
+    r"(?:total|estimated|construction|project)\s+(?:\w+\s+){0,2}?costs?"
+    r"[^.$]{0,80}?\$\s?([\d,]+(?:\.\d{2})?)",
+    re.I,
+)
+RE_COST_TRAILING = re.compile(
+    r"\$\s?([\d,]+(?:\.\d{2})?)[^.$]{0,40}?\b(?:total|estimated)\s+(?:project\s+)?costs?\b",
+    re.I,
+)
+RE_ROW_COST = re.compile(
+    r"right[-\s]of[-\s]way[^.$]{0,80}?\$\s?([\d,]+(?:\.\d{2})?)", re.I
+)
+RE_MITIG_RATIO = re.compile(
+    r"mitigation\s+ratios?[^.]{0,40}?([\d.]+)(?:\s*(?:and|,|&)\s*([\d.]+))?", re.I
+)
+# Two patterns, not one: a context window cannot overlap itself, so findall on
+# the wide pattern silently absorbs a second amount that falls inside the first
+# window and undercounts. Count with the narrow one, quote with the wide one.
+RE_DOLLAR_AMOUNT = re.compile(r"\$\s?[\d,]+(?:\.\d{2})?")
+RE_DOLLAR_CONTEXT = re.compile(r".{0,70}\$\s?[\d,]+(?:\.\d{2})?.{0,50}")
+
+# The demand signal that matters most for a bat-survey firm. A determination
+# says whether bats were affected; THIS says whether someone was paid to go
+# look. Detected only in non-boilerplate sentences: the FWS letter's "may
+# require a presence/absence and/or habitat survey" would otherwise make every
+# document in the corpus look like billable work.
+SURVEY_TYPES = {
+    "presence/absence": r"presence\s*/?\s*(?:and\s*/\s*or\s+)?absence\s+survey",
+    "mist-net": r"mist[-\s]?net(?:ting)?(?:\s+surveys?)?",
+    "acoustic": r"acoustic(?:\s+\w+){0,2}?\s+surve(?:y|ys|illance)",
+    "emergence": r"emergence\s+survey",
+    "habitat assessment": r"habitat\s+assessment",
+}
+SURVEY_TYPE_RE = {k: re.compile(v, re.I) for k, v in SURVEY_TYPES.items()}
+RE_SURVEY_DONE = re.compile(
+    r"\b(?:were|was|have\s+been|has\s+been)\s+(?:conducted|performed|completed)\b"
+    r"|\bsurveys?\s+conducted\b",
+    re.I,
+)
+RE_SURVEY_NEEDED = re.compile(
+    r"\b(?:will\s+be\s+(?:required|conducted|performed)|is\s+required|are\s+required"
+    r"|must\s+be\s+(?:conducted|performed))\b",
+    re.I,
+)
+
 # Determination sentences, longest/most specific first. The order is load
 # bearing: "likely to adversely affect" is a substring of "not likely to
 # adversely affect", and determinations() takes the FIRST pattern that matches.
@@ -80,6 +135,37 @@ DET_PATTERNS = [
 ]
 
 RANK = {"NE": 0, "NLAA": 1, "LAA": 2}
+
+# The FWS/IPaC cover letter survives trim() -- it is not Nationwide Permit
+# boilerplate -- and it is written in the same vocabulary as a real finding:
+#   "If you determine that this project will have no effect on listed species
+#    and their habitat in any way, then you have completed Section 7
+#    consultation with the Service and may use this letter in your project file"
+# That is a rule, not a finding about this project, and it produced the largest
+# single category in the review queue (72 of 143 rows on the 75-document run).
+#
+# Filtered by sentence rather than by trimming the block: the letter appears
+# before the narrative in some documents and after it in others, so cutting at
+# a marker would silently discard real determinations in the first case.
+#
+# Deliberately narrow. Each pattern matches instructional or hypothetical
+# phrasing that a determination about a specific project does not use. A real
+# finding reads "ARDOT has determined..." or "the project will have no effect
+# on the gray bat" -- neither is conditional, and neither addresses "you".
+BOILERPLATE_SENTENCE_PATTERNS = [
+    re.compile(r"\bif\s+you\s+(?:determine|have|are|would|wish)\b", re.I),
+    re.compile(r"\bif\s+your\s+species\s+list\b", re.I),
+    re.compile(r"\bshould\s+you\s+(?:determine|require|need|have)\b", re.I),
+    re.compile(r"\byou\s+have\s+completed\s+section\s+7\b", re.I),
+    re.compile(r"\buse\s+this\s+letter\s+in\s+your\s+project\s+file\b", re.I),
+    re.compile(r"\bmay\s+require\s+(?:a\s+)?(?:presence\s*/\s*absence|habitat)\b", re.I),
+    re.compile(r"\bthis\s+(?:species\s+)?list\s+(?:is|does\s+not)\b", re.I),
+]
+
+
+def is_boilerplate(sentence: str) -> bool:
+    """True for FWS letter rules and hypotheticals, not findings about a project."""
+    return any(p.search(sentence) for p in BOILERPLATE_SENTENCE_PATTERNS)
 
 # How far back to look for the species a bare verdict sentence refers to.
 # Deliberately short: ARDOT states the list and the finding as adjacent
@@ -108,6 +194,12 @@ class Record:
     det_source: str = ""  # direct / inferred / mixed -- how the verdicts were reached
     acres_cleared: str = ""
     mitigation_usd: str = ""
+    mitigation_ratio: str = ""
+    project_cost_usd: str = ""
+    row_cost_usd: str = ""
+    n_dollar_figures: str = ""  # how many $ amounts the document contains at all
+    survey_types: str = ""      # pipe-delimited, boilerplate mentions excluded
+    survey_status: str = ""     # conducted / required / mentioned
     pup_season_restriction: str = ""
     source_url: str = ""
     sha256: str = ""
@@ -153,6 +245,7 @@ class Determination:
     mentions: dict = field(default_factory=dict)   # code -> sentences naming it
     inferred_from: dict = field(default_factory=dict)  # code -> bridging sentence
     orphans: list = field(default_factory=list)    # verdicts naming no species
+    boilerplate_skipped: int = 0                   # FWS letter rules ignored
 
 
 def _apply(det: Determination, code: str, verdict: str, how: str) -> None:
@@ -164,6 +257,38 @@ def _apply(det: Determination, code: str, verdict: str, how: str) -> None:
         return  # LAA found anywhere outranks a weaker verdict of the same kind
     det.verdicts[code] = verdict
     det.source[code] = how
+
+
+def survey_signals(body: str) -> tuple[list[str], str, list[str]]:
+    """Survey types actually discussed for this project, and whether they happened.
+
+    Returns (types, status, evidence sentences). Boilerplate sentences are
+    excluded first: the FWS letter tells every applicant their project "may
+    require a presence/absence and/or habitat survey", which is a rule about
+    the program, not a fact about this job. Counting those would turn the whole
+    corpus into apparent demand.
+
+    Status is the strongest signal found -- "conducted" outranks "required",
+    which outranks a bare mention -- because a completed survey is evidence
+    someone was paid and a required one is only evidence someone will be.
+    """
+    found, evidence, status = {}, [], ""
+    for sent in sentences(body):
+        if is_boilerplate(sent):
+            continue
+        hits = [name for name, pat in SURVEY_TYPE_RE.items() if pat.search(sent)]
+        if not hits:
+            continue
+        for name in hits:
+            found[name] = True
+        evidence.append(sent.strip())
+        if RE_SURVEY_DONE.search(sent):
+            status = "conducted"
+        elif RE_SURVEY_NEEDED.search(sent) and status != "conducted":
+            status = "required"
+        elif not status:
+            status = "mentioned"
+    return sorted(found), status, evidence
 
 
 def determinations(body: str) -> Determination:
@@ -192,6 +317,13 @@ def determinations(body: str) -> Determination:
     ]
 
     for i, sent in enumerate(sents):
+        # FWS letter rules carry determination vocabulary but assert nothing
+        # about this project. Skipped before they can set a verdict, seed an
+        # inferred attribution, or pad the orphan queue. Counted so the effect
+        # of this filter stays visible rather than becoming invisible cleanup.
+        if is_boilerplate(sent):
+            det.boilerplate_skipped += 1
+            continue
         clean = sent.strip()
         for code in species_at[i]:
             det.mentions.setdefault(code, []).append(clean)
@@ -261,6 +393,22 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
     if m := RE_PUPSEASON.search(body):
         rec.pup_season_restriction = f"{m.group(1)}-{m.group(2)}"
 
+    # Financial fields. Whether ARDOT states a project cost in a NEPA document
+    # at all is exactly what the first full run answers -- n_dollar_figures and
+    # the queued dollar-context rows report what is really there.
+    if m := (RE_PROJECT_COST.search(body) or RE_COST_TRAILING.search(body)):
+        rec.project_cost_usd = m.group(1).replace(",", "")
+    if m := RE_ROW_COST.search(body):
+        rec.row_cost_usd = m.group(1).replace(",", "")
+    if m := RE_MITIG_RATIO.search(body):
+        rec.mitigation_ratio = "|".join(g for g in m.groups() if g)
+    rec.n_dollar_figures = str(len(RE_DOLLAR_AMOUNT.findall(body)))
+    dollars = RE_DOLLAR_CONTEXT.findall(body)
+
+    survey_types, survey_status, survey_evidence = survey_signals(body)
+    rec.survey_types = "|".join(survey_types)
+    rec.survey_status = survey_status
+
     low = body.lower()
     listed = sorted({code for name, code in BATS.items() if name in low})
     rec.bats_listed = "|".join(listed)
@@ -312,6 +460,32 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
                 ),
             }
         )
+
+    # Survey evidence is the demand signal the business case rests on, so it is
+    # queued with its sentences rather than asserted as a bare column value.
+    if survey_evidence:
+        queue.append(
+            {
+                "job_id": rec.job_id,
+                "reason": f"survey-{survey_status}-{'|'.join(survey_types)}",
+                "sentence": " | ".join(survey_evidence)[:1500],
+            }
+        )
+
+    # Every dollar figure with its surrounding words. This is a diagnostic, not
+    # a finding: it exists so one full run establishes what ARDOT actually
+    # writes about money, instead of us inferring it from two documents.
+    if dollars:
+        queue.append(
+            {
+                "job_id": rec.job_id,
+                "reason": f"dollar-context-{len(dollars)}",
+                "sentence": " || ".join(d.strip() for d in dollars[:6])[:1500],
+            }
+        )
+
+    if det.boilerplate_skipped:
+        notes.append(f"fws-boilerplate-skipped:{det.boilerplate_skipped}")
 
     # An inferred verdict is a lead, not a finding. Surface every one.
     guessed = sorted(c for c, how in det.source.items() if how == "inferred")

@@ -57,7 +57,11 @@ NUMERIC = {
     "any_bat_LAA",
     "acres_cleared",
     "mitigation_usd",
+    "project_cost_usd",
+    "row_cost_usd",
+    "n_dollar_figures",
 }
+CURRENCY = {"mitigation_usd", "project_cost_usd", "row_cost_usd"}
 
 
 def typed(field: str, value: str):
@@ -101,9 +105,12 @@ def sheet_records(wb, records: list[dict]) -> None:
     ws.append(cols)
     for r in records:
         ws.append([typed(c, r.get(c, "")) for c in cols])
+    money_cols = {i for i, c in enumerate(cols, start=1) if c in CURRENCY}
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.font = Font(name=FONT)
+            if cell.column in money_cols and isinstance(cell.value, (int, float)):
+                cell.number_format = "$#,##0"
     style_header(ws)
     autosize(ws)
     ref = f"A1:{get_column_letter(len(cols))}{len(records) + 1}"
@@ -237,6 +244,95 @@ def sheet_handcode(wb, records: list[dict]) -> None:
     ws.freeze_panes = ws.cell(row=head + 1, column=3)
 
 
+def sheet_financials(wb, records: list[dict]) -> None:
+    """Money and demand signals, with the traps stated before the numbers."""
+    ws = wb.create_sheet("Financials")
+    cols = list(records[0].keys()) if records else []
+    last = len(records) + 1
+
+    def col(name: str) -> str:
+        return get_column_letter(cols.index(name) + 1) if name in cols else None
+
+    ws["A1"] = "Financial and demand signals"
+    ws["A1"].font = Font(name=FONT, bold=True, size=14)
+
+    ws["A2"] = (
+        "mitigation_usd is an in-lieu fee paid to a conservation fund. No consultant "
+        "earns it. It is an intensity signal, never market size, and must not be summed "
+        "into a revenue figure. project_cost_usd is the construction project's own cost, "
+        "not survey spend. The revenue-relevant column is survey_status."
+    )
+    ws["A2"].font = Font(name=FONT, italic=True, color="9C0006")
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells("A2:F2")
+    ws.row_dimensions[2].height = 46
+
+    r = 4
+    ws.cell(row=r, column=1, value="Coverage — how much of the corpus states each field")
+    ws.cell(row=r, column=1).font = Font(name=FONT, bold=True)
+    r += 1
+    ws.cell(row=r, column=2, value="populated").font = Font(name=FONT, bold=True)
+    ws.cell(row=r, column=3, value="of records").font = Font(name=FONT, bold=True)
+    ws.cell(row=r, column=4, value="sum (see caveat)").font = Font(name=FONT, bold=True)
+    r += 1
+
+    for field_name, summable in [
+        ("project_cost_usd", True),
+        ("row_cost_usd", True),
+        ("mitigation_usd", False),
+        ("mitigation_ratio", False),
+        ("acres_cleared", True),
+        ("n_dollar_figures", False),
+    ]:
+        c = col(field_name)
+        ws.cell(row=r, column=1, value=field_name).font = Font(name=FONT)
+        if c:
+            rng = f"Records!{c}2:{c}{last}"
+            ws.cell(row=r, column=2, value=f'=COUNTIF({rng},"<>")')
+            ws.cell(row=r, column=3, value=f"=COUNTA(Records!A2:A{last})")
+            if summable:
+                cell = ws.cell(row=r, column=4, value=f"=SUM({rng})")
+                cell.number_format = "$#,##0" if field_name.endswith("usd") else "0.00"
+            else:
+                ws.cell(row=r, column=4, value="— do not sum")
+                ws.cell(row=r, column=4).font = Font(name=FONT, italic=True, color="9C0006")
+        for cc in range(2, 5):
+            if not ws.cell(row=r, column=cc).font.i:
+                ws.cell(row=r, column=cc).font = Font(name=FONT)
+        r += 1
+
+    r += 1
+    ws.cell(row=r, column=1, value="Survey demand — the revenue-relevant signal")
+    ws.cell(row=r, column=1).font = Font(name=FONT, bold=True)
+    r += 1
+    sc = col("survey_status")
+    for label, value in [
+        ("surveys conducted", "conducted"),
+        ("surveys required", "required"),
+        ("survey mentioned only", "mentioned"),
+        ("no survey signal", ""),
+    ]:
+        ws.cell(row=r, column=1, value=label).font = Font(name=FONT)
+        if sc:
+            rng = f"Records!{sc}2:{sc}{last}"
+            formula = f'=COUNTIF({rng},"{value}")' if value else f'=COUNTIF({rng},"")'
+            ws.cell(row=r, column=2, value=formula).font = Font(name=FONT)
+        r += 1
+
+    ws.cell(row=r, column=1, value=(
+        "FWS boilerplate advising that a project 'may require a presence/absence "
+        "survey' is excluded — it is a rule for every applicant, not demand from "
+        "this job. Counting it would turn the whole corpus into apparent revenue."
+    )).font = Font(name=FONT, italic=True)
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    ws.row_dimensions[r].height = 40
+
+    ws.column_dimensions["A"].width = 46
+    for c in "BCDEF":
+        ws.column_dimensions[c].width = 17
+
+
 def sheet_summary(wb, records: list[dict], queue: list[dict]) -> None:
     ws = wb.create_sheet("Summary", 0)
     ws["A1"] = "ARDOT bat determinations -- parse summary"
@@ -323,6 +419,7 @@ def main() -> None:
     sheet_records(wb, records)
     sheet_queue(wb, queue)
     if records:
+        sheet_financials(wb, records)
         sheet_handcode(wb, records)
     sheet_summary(wb, records, queue)
     OUT.parent.mkdir(parents=True, exist_ok=True)
