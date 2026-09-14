@@ -20,6 +20,7 @@ import random
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -64,6 +65,21 @@ NUMERIC = {
 CURRENCY = {"mitigation_usd", "project_cost_usd", "row_cost_usd"}
 
 
+def clean(value):
+    """Strip characters XLSX cannot hold.
+
+    Some ARDOT PDFs embed subsetted fonts with no ToUnicode map, so pdftotext
+    emits raw glyph codes -- text comes out shifted by 29 ASCII positions
+    ("ARDOT" as "$5'27") and carries control characters that openpyxl refuses.
+    Dropping them keeps the garbled text visible in the queue, which is the
+    honest outcome: those passages were not read, and the workbook should show
+    that rather than quietly omit the row.
+    """
+    if not isinstance(value, str):
+        return value
+    return ILLEGAL_CHARACTERS_RE.sub("", value)
+
+
 def typed(field: str, value: str):
     if field not in NUMERIC or value in ("", None):
         return value
@@ -104,7 +120,7 @@ def sheet_records(wb, records: list[dict]) -> None:
     cols = list(records[0].keys())
     ws.append(cols)
     for r in records:
-        ws.append([typed(c, r.get(c, "")) for c in cols])
+        ws.append([clean(typed(c, r.get(c, ""))) for c in cols])
     money_cols = {i for i, c in enumerate(cols, start=1) if c in CURRENCY}
     for row in ws.iter_rows(min_row=2):
         for cell in row:
@@ -123,7 +139,7 @@ def sheet_queue(wb, queue: list[dict]) -> None:
     ws = wb.create_sheet("Review queue")
     ws.append(["job_id", "reason", "sentence"])
     for q in queue:
-        ws.append([q.get("job_id", ""), q.get("reason", ""), q.get("sentence", "")])
+        ws.append([clean(q.get("job_id", "")), clean(q.get("reason", "")), clean(q.get("sentence", ""))])
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.font = Font(name=FONT)
@@ -242,6 +258,102 @@ def sheet_handcode(wb, records: list[dict]) -> None:
     autosize(ws, limit=30)
     ws.column_dimensions["B"].width = 46
     ws.freeze_panes = ws.cell(row=head + 1, column=3)
+
+
+def sheet_annual(wb, records: list[dict]) -> None:
+    """The deliverable: bat-triggering project-years by doc_year.
+
+    Keyed on doc_year, never index_year. The full run makes the difference
+    unmissable -- documents filed under index years 2021+ carry doc_year values
+    going back to 2013.
+    """
+    ws = wb.create_sheet("Annual series")
+    cols = list(records[0].keys()) if records else []
+    last = len(records) + 1
+
+    def col(name: str) -> str:
+        return get_column_letter(cols.index(name) + 1) if name in cols else "A"
+
+    ws["A1"] = "Bat-triggering project-years, by doc_year"
+    ws["A1"].font = Font(name=FONT, bold=True, size=14)
+    ws["A2"] = (
+        "Keyed on doc_year (the date inside the PDF), never index_year. Two counts are "
+        "given for determinations because they differ in how much they can bear: "
+        "'direct' rests on a sentence naming both the species and the verdict; "
+        "'any' includes proximity-inferred verdicts, which are leads. The gap between "
+        "'listed' and 'any verdict' is the unresolved pile — those are unknowns, not zeros."
+    )
+    ws["A2"].font = Font(name=FONT, italic=True)
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells("A2:H2")
+    ws.row_dimensions[2].height = 46
+
+    head = 4
+    headers = [
+        "doc_year", "records", "bats listed", "verdict: direct",
+        "verdict: any", "any_bat_LAA", "survey conducted", "survey required",
+    ]
+    for i, h in enumerate(headers, start=1):
+        ws.cell(row=head, column=i, value=h)
+
+    yr, nb, ds, ab, ss = (col("doc_year"), col("n_bats_listed"),
+                          col("det_source"), col("any_bat_LAA"), col("survey_status"))
+
+    def rng(c):
+        return f"Records!{c}2:{c}{last}"
+
+    years = sorted({r["doc_year"] for r in records if r["doc_year"]})
+    r = head + 1
+    for y in years:
+        ws.cell(row=r, column=1, value=int(y))
+        ws.cell(row=r, column=2, value=f'=COUNTIF({rng(yr)},{y})')
+        ws.cell(row=r, column=3, value=f'=COUNTIFS({rng(yr)},{y},{rng(nb)},">0")')
+        ws.cell(row=r, column=4, value=(
+            f'=COUNTIFS({rng(yr)},{y},{rng(ds)},"direct")'
+            f'+COUNTIFS({rng(yr)},{y},{rng(ds)},"mixed")'))
+        ws.cell(row=r, column=5, value=(
+            f'=COUNTIFS({rng(yr)},{y},{rng(ds)},"direct")'
+            f'+COUNTIFS({rng(yr)},{y},{rng(ds)},"inferred")'
+            f'+COUNTIFS({rng(yr)},{y},{rng(ds)},"mixed")'))
+        ws.cell(row=r, column=6, value=f'=COUNTIFS({rng(yr)},{y},{rng(ab)},1)')
+        ws.cell(row=r, column=7, value=f'=COUNTIFS({rng(yr)},{y},{rng(ss)},"conducted")')
+        ws.cell(row=r, column=8, value=f'=COUNTIFS({rng(yr)},{y},{rng(ss)},"required")')
+        for c in range(1, 9):
+            cell = ws.cell(row=r, column=c)
+            cell.font = Font(name=FONT, bold=2021 <= int(y) <= 2026)
+        r += 1
+
+    tot = r + 1
+    ws.cell(row=tot, column=1, value="TOTAL")
+    for c in range(2, 9):
+        L = get_column_letter(c)
+        ws.cell(row=tot, column=c, value=f"=SUM({L}{head+1}:{L}{r-1})")
+    for c in range(1, 9):
+        ws.cell(row=tot, column=c).font = Font(name=FONT, bold=True)
+
+    note = tot + 2
+    for i, line in enumerate([
+        "Bold rows are the 2021+ study period. Earlier years appear because index_year is "
+        "the POSTING year — documents posted from 2021 onward carry document dates back to 2013.",
+        "'records' counts documents, not necessarily distinct projects. One PDF can serve many "
+        "job numbers (largest group seen: 13 jobs, one document). Whether those are 13 "
+        "project-years or 1 is an open decision that scales this table — see shared-pdf rows "
+        "in the review queue.",
+        "Do not read a low any_bat_LAA count as low adverse-effect incidence until the "
+        "unresolved pile is worked down. 'verdict: any' minus 'bats listed' is how much of "
+        "each year is still unknown.",
+        "The 2026 row is a partial year.",
+    ], start=1):
+        c = ws.cell(row=note + i, column=1, value=f"{i}. {line}")
+        c.font = Font(name=FONT)
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.merge_cells(start_row=note + i, start_column=1, end_row=note + i, end_column=8)
+        ws.row_dimensions[note + i].height = 30
+
+    ws.column_dimensions["A"].width = 14
+    for c in "BCDEFGH":
+        ws.column_dimensions[c].width = 15
+    style_header(ws, row=head)
 
 
 def sheet_financials(wb, records: list[dict]) -> None:
@@ -419,6 +531,7 @@ def main() -> None:
     sheet_records(wb, records)
     sheet_queue(wb, queue)
     if records:
+        sheet_annual(wb, records)
         sheet_financials(wb, records)
         sheet_handcode(wb, records)
     sheet_summary(wb, records, queue)
