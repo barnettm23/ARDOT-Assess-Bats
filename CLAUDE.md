@@ -30,8 +30,17 @@ Index page (scrape this — do not construct URLs):
 ```
 https://ardot.gov/divisions/program-management/construction-contract-development/construction-contractors/additional-project-information-2/environmental-documents/
 ```
-Individual PDFs live on `media.ark.org/ardot/`. Roughly 65–155 documents per
-year, 2021–2026, so ~700–800 total.
+Individual PDFs live on `media.ark.org/ardot/`.
+
+**Measured 2026-09-14, not estimated:** the index carries **1,198 documents
+across 2017–2026** — four years further back than this file previously assumed.
+Of those, **713 fall under index years 2021+**, which matches the old ~700–800
+estimate almost exactly; the extra 485 are genuinely pre-study-period.
+
+```
+2017:  68    2018: 137    2019:  97    2020: 183    2021: 105
+2022: 137    2023: 162    2024: 134    2025:  94    2026:  81
+```
 
 ## Pipeline
 
@@ -40,6 +49,18 @@ python harvest.py        # index HTML -> data/manifest.csv
 python fetch.py 10       # manifest -> cache/pdf/   (LIMIT ARG — use it first)
 python parse.py          # PDFs -> data/records.csv + data/review_queue.csv
 ```
+
+`fetch.py` honours `MIN_INDEX_YEAR` (default **2021**). Without it, the manifest
+sorts by `index_year` and `fetch.py 10` samples the *oldest* documents on the
+site — the first real sample came back entirely from 2017, two of them dated
+2006 and 2010. This is a fetch filter only and does not weaken trap 3: a
+document cannot be posted before it is written, so `index_year >= Y` is a
+superset of `doc_year >= Y` and excludes nothing in scope.
+
+The GitHub Actions workflow exposes this as the `min_year` dispatch input, and
+`limit` (`0` = full harvest). A scheduled run with no inputs is capped at 25 —
+`github.event.inputs` is null on `schedule`, and an unguarded interpolation
+there means an unbounded ~1,200-document fetch.
 
 Flat layout: scripts at repo root, `ROOT = Path(__file__).resolve().parent`.
 Only `.github/workflows/refresh.yml` is nested (GitHub requires it).
@@ -58,14 +79,30 @@ These are not hypotheticals. Each was observed directly.
 2. **The index contains broken links.** Job `012542` points at
    `012550env.pdf`; `A70020` points at `A70022env.pdf`; `012428` appears twice,
    once pointing at `012430env.pdf`. `harvest.py` flags these as
-   `id_url_mismatch`. Do not silently trust the job label.
+   `id_url_mismatch`. Do not silently trust the job label. The live harvest
+   flags **5** such rows out of 1,198.
+
+   A second form of this trap does **not** get flagged: jobs `012380` and
+   `012381` have distinct, correct-looking hrefs (`012380env.pdf`,
+   `012381env.pdf`) and `id_url_mismatch=0`, yet serve **byte-identical PDFs**.
+   Same sha256. See the dedup warning under trap 3.
 
 3. **Index years are POSTING years, not document dates — this is the big one.**
    Job `110751` sits under the 2026 heading but is dated 2024-02-06. Jobs repeat
    across headings: `012494` under 2024 and 2025; `A50025` under 2023, 2024 and
    2025; `030530` under 2023 and 2024. **Any annual series keyed off
    `index_year` is wrong.** Use `doc_year`, extracted from inside the PDF.
-   Records dedupe on PDF `sha256`.
+
+   Confirmed live and worse than documented: job `012007` sits under 2017 but is
+   dated **2006** — an eleven-year gap. Job `020484` under 2017 is dated 2010.
+   Five of the nine documents sampled from index year 2021 are dated 2020.
+
+   Records dedupe on PDF `sha256`. **That dedup currently loses projects.** It
+   was written for one document posted under two index years; it also fires when
+   two *distinct jobs* share content, as `012380`/`012381` do. `012381` is absent
+   from `records.csv` entirely — no row, no flag, no `review_queue` entry. Since
+   the countable unit is the bat-triggering project-year, a silent drop here
+   undercounts the headline number. Fix before trusting any annual series.
 
 4. **~90% of each PDF is identical Nationwide Permit boilerplate**, starting at
    the marker `"Nationwide Permit No."`. `parse.py` truncates there. This cuts
@@ -95,9 +132,29 @@ Species codes: `GRBA` gray, `IBAT` Indiana, `NLEB` northern long-eared,
 
 ## State of the code — READ THIS
 
-**The scripts have never been run against the live site.** They were written in
-a sandbox with no network access to ardot.gov. They compile; that is all that is
-proven. The regexes were built from **two** documents read in full:
+**Superseded 2026-09-14: the pipeline has now run against the live site.** Two
+sample runs on a GitHub Actions runner (the dev container's egress policy blocks
+`ardot.gov` and `media.ark.org`, so local runs are not possible; dispatch the
+`refresh` workflow instead).
+
+What the live runs established:
+
+- `harvest.py` **works.** It cleared its 300-link guard on the first attempt —
+  no year-heading debugging was needed. 1,198 documents, 2017–2026.
+- `fetch.py` **works.** 20 PDFs fetched across two runs, zero `fetch_note`
+  values, 1 req/sec held.
+- `parse.py` **runs, and populates dates, counties, tiers, FAP and species
+  lists.** Determination extraction is the weak part: **1 of 19 records resolved
+  any verdict at all** — job `012377`, which resolved all four of its listed
+  species. Every other record has empty `det_*` columns. See "What the live run
+  actually broke" below.
+- Still completely untested: `acres_cleared`, `mitigation_usd`,
+  `pup_season_restriction`, `project_length_mi`. Every sampled document was a
+  Tier 1 CE with no adverse-effect finding, so none of those fields *should*
+  populate. They will not be exercised until the sample reaches a Tier 3 with an
+  LAA, like job `050475` below.
+
+The regexes were built from **two** documents read in full:
 
 - Job `050475` — Little Piney Creek Str. & Apprs., Hwy 56, Izard County, July
   2022. Tier 3 CE. IPaC listed 10 species. Determinations: "no effect" on three
@@ -110,25 +167,65 @@ proven. The regexes were built from **two** documents read in full:
   2024-02-06 but filed under the 2026 index heading. Tier 1 CE. "No effect" on
   NLEB; TCB noted as proposed endangered, no jeopardy.
 
-Two documents is a thin basis for patterns that must hold across 700. **Expect
-the first run to be a debugging session, not a harvest.**
+Two documents proved a thin basis for patterns that must hold across 1,198. The
+first run was a debugging session, as predicted — just not of the predicted bugs.
+
+## What the live run actually broke
+
+Fixed, and merged:
+
+- **`DET_PATTERNS` inverted every NLAA into LAA.** `likely to adversely affect`
+  is a substring of `not likely to adversely affect`, and the list tested LAA
+  first while `determinations()` takes the first match. This silently flipped
+  `any_bat_LAA` — the field the revenue model rests on — in the direction that
+  overstates it. Latent until extraction started working. **If you reorder
+  `DET_PATTERNS`, keep NLAA ahead of LAA.**
+- **`review_queue.csv` was blank exactly where it mattered.** A species reaches
+  that queue *because* no verdict resolved, which made the set of matched
+  sentences empty by construction. Every row arrived with an empty `sentence`.
+  It now carries the sentences naming that species.
+- **The date regex missed the Tier 3 cover format** (`July 2022`), as predicted
+  below. `RE_DATE_MY` is the fallback; the full date still wins where present.
+
+Open, and the real work:
+
+- **Species and verdicts live in different sentences.** This is the root cause of
+  the 1-of-19 determination rate, and it is *not* the failure mode this file
+  predicted. Species names appear in IPaC species-list tables (`Mammals NAME
+  STATUS Gray Bat (Myotis grisescens) Endangered`), in FWS boilerplate (`If your
+  species list includes any mussels, Northern Long-eared Bat, Indiana Bat...`),
+  and in `ecos.fws.gov` profile URLs. The determinations sit in narrative prose
+  that usually does not repeat the species name. Sentence-level co-occurrence
+  cannot bridge that, and no amount of pattern tuning will fix it — it needs a
+  scoping rule or the LLM pass described below.
+- **The multi-species risk is real but unproven.** Job `012377` resolved `NE` for
+  all four listed bats with `parse_status: ok` and no notes. That may be correct;
+  a Tier 3 CE can genuinely find no effect on all four. There is no evidence
+  attached either way, which is the point — it does not self-flag.
+- **`pdftotext -layout` interleaves page furniture mid-sentence.** From job
+  `012375`: `identified the Indiana Bat (Myotis Job Number 012375 Tier 1
+  Categorical Exclusion Page 2 of 2 sodalis), northern long-eared bat`. The
+  running header splits the binomial across a page break, corrupting sentence
+  segmentation. Strip repeating `Job Number`/`Tier N`/`Page N of N` lines before
+  `trim()`.
+- **`RE_COUNTY` matches form labels.** Job `012359` records `county="Job Name"`,
+  picked out of a header laying out `Job Name | County | Route` as columns.
+  Arkansas has 75 counties — a closed set, cheap to validate against.
+- **The sha256 dedup drops distinct jobs.** See trap 3.
 
 ## Debug order
 
 1. **`harvest.py` first.** It aborts if it parses fewer than 300 links — a loud
    failure beats a silent partial parse. If it aborts, the year-heading walk is
    wrong; the headings may not be the tags assumed. Dump the first 30 anchors and
-   adjust.
-2. **Check `doc_year` vs `index_year`** on the first ten rows. Disagreement is
-   correct and expected. Many blank `doc_year` values mean the date regex is too
-   narrow — ARDOT uses at least two formats ("February 6, 2024" memo style,
-   "July 2022" Tier 3 cover style) and only the first is currently caught.
-3. **Check `bats_listed` against the `det_*` columns.** This gap is the real
-   work. The determination logic reads sentence-by-sentence and keeps the worst
-   verdict per species. **Known weakness:** a single sentence listing several
-   species with *different* verdicts will be mis-assigned, and it will not
-   self-flag — only species with *no* verdict at all reach
-   `review_queue.csv`. Hand-check for this specifically.
+   adjust. *(Passed on first live attempt, 2026-09-14.)*
+2. **Check `doc_year` vs `index_year`.** Disagreement is correct and expected —
+   confirmed at 2/10 and 5/9 in the two samples. Blank `doc_year` values mean the
+   date regex is too narrow; ARDOT uses at least two formats ("February 6, 2024"
+   memo style, "July 2022" Tier 3 cover style). *(Both now handled.)*
+3. **Check `bats_listed` against the `det_*` columns.** Still the real work, but
+   read "What the live run actually broke" first — the gap is a sentence-scoping
+   problem, not a pattern problem, and this file previously described it wrong.
 
 ## Validation gate before anyone trusts a number
 
@@ -137,14 +234,30 @@ the first run to be a debugging session, not a harvest.**
 - Work `review_queue.csv` to zero, or document what was left and why.
 - **Verify every `any_bat_LAA == 1` row by hand.** Those are the ones that cost
   money and there will not be many.
+- **Do not read `any_bat_LAA == 0` as "no adverse effect found."** Across both
+  live samples it was 0 on every row, but 18 of 19 records resolved no verdict
+  at all. "Determined not to be adversely affected" and "extraction produced
+  nothing" are the same value in this column and must not be conflated. Until
+  the determination gap closes, treat the 0s as *unknown*, and count
+  `n_bats_listed > 0 AND no det_*` as the size of the unresolved pile.
+- Sample across the whole period, not the top of the manifest. `MIN_INDEX_YEAR`
+  is a floor, not a spread — 10 documents from 2021 are still 10 documents from
+  one year.
 
 ## Suggested next build: LLM pass on the review queue only
 
-Do **not** route all 700 documents through a model. Regex output is auditable;
+Do **not** route all 1,198 documents through a model. Regex output is auditable;
 LLM output needs spot-checking. Run the model only on `review_queue.csv` rows:
 feed the trimmed body, demand strict JSON mapping species → verdict, log model
 output beside the source sentence. At a few hundred rows this costs pennies.
 Keep the prompt in the repo as a file so it is reviewable.
+
+This is now the most valuable single build, and the review queue is finally
+carrying what it needs: real per-species sentences rather than an empty column.
+The sentence-scoping failure above is exactly the shape of problem a model
+handles well and regex does not — the species is in a table on page 2, the
+verdict is in prose on page 4, and a human reading both has no trouble.
+Feed the model the trimmed body, not the sentence alone, for that reason.
 
 ## Etiquette — non-negotiable
 
