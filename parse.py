@@ -295,6 +295,24 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
                 }
             )
 
+    # The validation gate requires every any_bat_LAA row to be checked by hand.
+    # That is impossible from the CSV alone if the sentence that produced the
+    # finding is nowhere in the output, so carry it. LAA rows are rare by
+    # design, so this does not bloat the queue.
+    if rec.any_bat_LAA == "1":
+        laa = sorted(c for c, v in dets.items() if v == "LAA")
+        queue.append(
+            {
+                "job_id": rec.job_id,
+                "reason": f"VERIFY-LAA-{','.join(laa)}-{rec.det_source}",
+                "sentence": (
+                    " | ".join(det.used)[:1500]
+                    if det.used
+                    else "no direct sentence -- every LAA here was inferred, see above"
+                ),
+            }
+        )
+
     # An inferred verdict is a lead, not a finding. Surface every one.
     guessed = sorted(c for c, how in det.source.items() if how == "inferred")
     if guessed:
