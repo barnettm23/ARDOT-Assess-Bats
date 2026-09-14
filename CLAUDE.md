@@ -120,15 +120,42 @@ These are not hypotheticals. Each was observed directly.
 | `project_length_mi` | project length |
 | `bats_listed`, `n_bats_listed` | IPaC bats on the species list, pipe-delimited |
 | `det_GRBA` … `det_LBB` | `NE` / `NLAA` / `LAA` per species |
+| `det_source` | **how those verdicts were reached** — see below |
 | `any_bat_LAA` | 1 if any bat reached likely-to-adversely-affect |
 | `acres_cleared` | acres of suitable habitat cleared |
 | `mitigation_usd` | in-lieu fee contribution |
 | `pup_season_restriction` | seasonal tree-clearing window |
-| `sha256` | dedup key and change detector |
+| `sha256` | change detector; dedup is on `(job_id, sha256)` |
 | `parse_status`, `parse_notes` | `ok` or `review`, with reasons |
 
 Species codes: `GRBA` gray, `IBAT` Indiana, `NLEB` northern long-eared,
 `OBEB` Ozark big-eared, `TCB` tricolored, `LBB` little brown.
+
+### `det_source` — read this before using any `det_*` column
+
+| value | meaning |
+|---|---|
+| `direct` | species and verdict appeared in the same sentence |
+| `inferred` | the verdict sentence named no species; attributed to species named within the preceding 3 sentences |
+| `mixed` | both, on different species in the same document |
+| *(blank)* | no verdict resolved |
+
+`inferred` exists because ARDOT routinely writes the species list and the
+finding as consecutive sentences — "...identified the Indiana Bat, northern
+long-eared bat... ARDOT has determined the project will have no effect on these
+species." Requiring co-occurrence in a single sentence resolved 1 of 19 records.
+
+**An `inferred` verdict is a lead, not a finding.** Every one is flagged in
+`parse_notes` and queued in `review_queue.csv` with the bridging sentence.
+Direct evidence always overrides an inferred verdict; an inferred verdict never
+overwrites a direct one. **Do not report any figure built on `inferred` rows
+without hand-checking them**, and say which is which on anything that leaves the
+repo.
+
+Verdict sentences with no species anywhere nearby land in `review_queue.csv` as
+`verdict-without-species`. That queue is the diagnostic for whatever document
+structure the proximity rule still fails to reach — work it before widening the
+lookback window, which sweeps in unrelated species fast.
 
 ## State of the code — READ THIS
 
@@ -187,17 +214,28 @@ Fixed, and merged:
 - **The date regex missed the Tier 3 cover format** (`July 2022`), as predicted
   below. `RE_DATE_MY` is the fallback; the full date still wins where present.
 
-Open, and the real work:
+- **Species and verdicts live in different sentences.** The root cause of the
+  1-of-19 determination rate, and *not* the failure mode this file predicted.
+  Species names appear in IPaC species-list tables (`Mammals NAME STATUS Gray
+  Bat (Myotis grisescens) Endangered`), in FWS boilerplate (`If your species
+  list includes any mussels, Northern Long-eared Bat, Indiana Bat...`), and in
+  `ecos.fws.gov` profile URLs. The determinations sit in narrative prose that
+  usually does not repeat the species name.
 
-- **Species and verdicts live in different sentences.** This is the root cause of
-  the 1-of-19 determination rate, and it is *not* the failure mode this file
-  predicted. Species names appear in IPaC species-list tables (`Mammals NAME
-  STATUS Gray Bat (Myotis grisescens) Endangered`), in FWS boilerplate (`If your
-  species list includes any mussels, Northern Long-eared Bat, Indiana Bat...`),
-  and in `ecos.fws.gov` profile URLs. The determinations sit in narrative prose
-  that usually does not repeat the species name. Sentence-level co-occurrence
-  cannot bridge that, and no amount of pattern tuning will fix it — it needs a
-  scoping rule or the LLM pass described below.
+  Addressed by proximity bridging — see `det_source` in the schema above. A
+  verdict sentence naming no species is attributed to species named in the
+  preceding 3 sentences and flagged `inferred`. **This is a heuristic and it is
+  not validated against hand-coded ground truth.** It is auditable rather than
+  correct: every inferred verdict carries its bridging sentence into the review
+  queue. The LLM pass below remains the better answer.
+
+- **The sha256 dedup dropped distinct jobs.** Fixed: the key is now
+  `(job_id, sha256)`, so one job posted under two index years still collapses
+  while two different jobs sharing a PDF both survive, flagged `shared-pdf` and
+  queued. Whether `012380`/`012381` is a shared document or a bad index link is
+  still an open question for a human.
+
+Open, and the real work:
 - **The multi-species risk is real but unproven.** Job `012377` resolved `NE` for
   all four listed bats with `parse_status: ok` and no notes. That may be correct;
   a Tier 3 CE can genuinely find no effect on all four. There is no evidence

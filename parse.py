@@ -79,6 +79,13 @@ DET_PATTERNS = [
     ("NE", re.compile(r"\bno\s+effect\b", re.I)),
 ]
 
+RANK = {"NE": 0, "NLAA": 1, "LAA": 2}
+
+# How far back to look for the species a bare verdict sentence refers to.
+# Deliberately short: ARDOT states the list and the finding as adjacent
+# sentences, and a wider window starts sweeping in unrelated species.
+LOOKBACK_SENTENCES = 3
+
 
 @dataclass
 class Record:
@@ -98,6 +105,7 @@ class Record:
     det_TCB: str = ""
     det_LBB: str = ""
     any_bat_LAA: str = ""
+    det_source: str = ""  # direct / inferred / mixed -- how the verdicts were reached
     acres_cleared: str = ""
     mitigation_usd: str = ""
     pup_season_restriction: str = ""
@@ -135,33 +143,77 @@ def sentences(body: str) -> list[str]:
     return re.split(r"(?<=[.;])\s+", flat)
 
 
-def determinations(body: str) -> tuple[dict, list[str], dict]:
-    """Map each bat code to NE / NLAA / LAA.
+@dataclass
+class Determination:
+    """Verdicts plus the evidence for each, so nothing is asserted unsourced."""
 
-    Returns the verdicts, the sentences that produced them, and every sentence
-    mentioning each species whether or not a verdict matched. That third value
-    is what a reviewer needs: a species reaches the queue precisely because no
-    verdict was resolved, so the sentences that did match are the empty set.
+    verdicts: dict = field(default_factory=dict)   # code -> NE/NLAA/LAA
+    source: dict = field(default_factory=dict)     # code -> direct/inferred
+    used: list = field(default_factory=list)       # sentences giving direct verdicts
+    mentions: dict = field(default_factory=dict)   # code -> sentences naming it
+    inferred_from: dict = field(default_factory=dict)  # code -> bridging sentence
+    orphans: list = field(default_factory=list)    # verdicts naming no species
+
+
+def _apply(det: Determination, code: str, verdict: str, how: str) -> None:
+    """Record a verdict, preferring direct evidence and then the worse verdict."""
+    prior = det.source.get(code)
+    if prior == "direct" and how == "inferred":
+        return  # never let a guess overwrite a sourced determination
+    if prior == how and RANK[verdict] <= RANK[det.verdicts[code]]:
+        return  # LAA found anywhere outranks a weaker verdict of the same kind
+    det.verdicts[code] = verdict
+    det.source[code] = how
+
+
+def determinations(body: str) -> Determination:
+    """Map each bat code to NE / NLAA / LAA, with the evidence for each.
+
+    Two attribution paths, kept distinguishable because their reliability
+    differs and the caller must be able to tell them apart:
+
+    "direct" -- the species and the verdict appear in the same sentence.
+
+    "inferred" -- the verdict sentence names no species, but a sentence just
+    before it does. ARDOT routinely writes the species list and the finding as
+    consecutive sentences ("...identified the Indiana Bat, northern long-eared
+    bat... ARDOT has determined the project will have no effect on these
+    species."), so requiring co-occurrence in one sentence resolved almost
+    nothing: 1 of 19 records in the first live sample. Every inferred verdict is
+    flagged and queued for review -- it is a lead, not a finding.
+
+    Verdicts matching nothing at all land in `orphans`, which is the diagnostic
+    for whatever structure this rule still fails to capture.
     """
-    out, used, mentions = {}, [], {}
-    for sent in sentences(body):
-        low = sent.lower()
-        present = [code for name, code in BATS.items() if name in low]
-        if not present:
-            continue
+    det = Determination()
+    sents = sentences(body)
+    species_at = [
+        [code for name, code in BATS.items() if name in s.lower()] for s in sents
+    ]
+
+    for i, sent in enumerate(sents):
         clean = sent.strip()
-        for code in present:
-            mentions.setdefault(code, []).append(clean)
+        for code in species_at[i]:
+            det.mentions.setdefault(code, []).append(clean)
+
         verdict = next((v for v, pat in DET_PATTERNS if pat.search(sent)), None)
         if not verdict:
             continue
-        used.append(clean)
-        for code in present:
-            # LAA wins over a weaker verdict found elsewhere in the document.
-            rank = {"NE": 0, "NLAA": 1, "LAA": 2}
-            if code not in out or rank[verdict] > rank[out[code]]:
-                out[code] = verdict
-    return out, used, mentions
+
+        if species_at[i]:
+            det.used.append(clean)
+            for code in species_at[i]:
+                _apply(det, code, verdict, "direct")
+            continue
+
+        back = [c for j in range(max(0, i - LOOKBACK_SENTENCES), i) for c in species_at[j]]
+        if not back:
+            det.orphans.append(clean)
+            continue
+        for code in dict.fromkeys(back):
+            _apply(det, code, verdict, "inferred")
+            det.inferred_from.setdefault(code, clean)
+    return det
 
 
 def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
@@ -214,10 +266,13 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
     rec.bats_listed = "|".join(listed)
     rec.n_bats_listed = str(len(listed))
 
-    dets, used, mentions = determinations(body)
+    det = determinations(body)
+    dets = det.verdicts
     for code, verdict in dets.items():
         setattr(rec, f"det_{code}", verdict)
     rec.any_bat_LAA = str(int("LAA" in dets.values()))
+    kinds = set(det.source.values())
+    rec.det_source = "mixed" if len(kinds) > 1 else (kinds.pop() if kinds else "")
 
     queue = []
     undetermined = [c for c in listed if c not in dets]
@@ -227,7 +282,7 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
             # Hand over the sentences naming THIS species, whichever way they
             # fell. Falling back to `used` would be empty by construction here,
             # and an empty sentence column defeats the point of the queue.
-            src = mentions.get(code)
+            src = det.mentions.get(code)
             queue.append(
                 {
                     "job_id": rec.job_id,
@@ -239,6 +294,31 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
                     ),
                 }
             )
+
+    # An inferred verdict is a lead, not a finding. Surface every one.
+    guessed = sorted(c for c, how in det.source.items() if how == "inferred")
+    if guessed:
+        notes.append(f"inferred:{','.join(guessed)}")
+        for code in guessed:
+            queue.append(
+                {
+                    "job_id": rec.job_id,
+                    "reason": f"inferred-determination-{code}-{dets[code]}",
+                    "sentence": det.inferred_from.get(code, "")[:1500],
+                }
+            )
+
+    # Verdicts that named no species and had none nearby. These are the shapes
+    # the proximity rule still cannot reach -- the diagnostic for what is next.
+    if det.orphans:
+        notes.append(f"orphan-verdicts:{len(det.orphans)}")
+        queue.append(
+            {
+                "job_id": rec.job_id,
+                "reason": "verdict-without-species",
+                "sentence": " | ".join(det.orphans)[:1500],
+            }
+        )
     if rec.any_bat_LAA == "1" and not rec.acres_cleared:
         notes.append("LAA-without-acres")
         queue.append(
@@ -266,14 +346,44 @@ def main() -> None:
         records.append(asdict(rec))
         queue.extend(q)
 
-    # Dedupe on sha256: the same document posted under two index years is one
-    # project, not two. This is the single biggest source of double-counting.
+    # Dedupe on (job_id, sha256). The same document posted under two index
+    # years is one project, and that still collapses here.
+    #
+    # What must NOT collapse is two DIFFERENT jobs served identical content --
+    # ARDOT does this: 012380 and 012381 have distinct, correct-looking hrefs
+    # and id_url_mismatch=0 but byte-identical PDFs. Keying on sha256 alone
+    # dropped 012381 with no row and no flag. The countable unit here is the
+    # bat-triggering project-year, so a silent drop undercounts the headline
+    # number. Keep both, flag the pair, and let a human decide whether it is a
+    # shared document or a bad link.
+    by_sha: dict[str, set[str]] = {}
+    for r in records:
+        if r["sha256"]:
+            by_sha.setdefault(r["sha256"], set()).add(r["job_id"])
+
     seen, unique = set(), []
     for r in records:
-        key = r["sha256"] or (r["job_id"], r["source_url"])
+        key = (r["job_id"], r["sha256"] or r["source_url"])
         if key in seen:
             continue
         seen.add(key)
+        shared = sorted(by_sha.get(r["sha256"], set()) - {r["job_id"]})
+        if shared:
+            r["parse_notes"] = ";".join(
+                filter(None, [r["parse_notes"], f"shared-pdf:{'|'.join(shared)}"])
+            )
+            r["parse_status"] = "review"
+            queue.append(
+                {
+                    "job_id": r["job_id"],
+                    "reason": "shared-pdf",
+                    "sentence": (
+                        f"byte-identical PDF also served for job(s) "
+                        f"{', '.join(shared)} at a different URL -- confirm whether "
+                        f"these are separate projects or a bad index link"
+                    ),
+                }
+            )
         unique.append(r)
 
     RECORDS.parent.mkdir(parents=True, exist_ok=True)
