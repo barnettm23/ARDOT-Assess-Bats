@@ -1,0 +1,11 @@
+job_id,doc_date,doc_year,county,fap,ce_tier,project_length_mi,bats_listed,n_bats_listed,det_GRBA,det_IBAT,det_NLEB,det_OBEB,det_TCB,det_LBB,any_bat_LAA,acres_cleared,mitigation_usd,pup_season_restriction,source_url,sha256,index_year,parse_status,parse_notes
+012007,"October 19, 2006",2006,Benton,NUMBER STP-9399(8),,,GRBA,1,,,,,,,0,,,,https://media.ark.org/ardot/012007env.pdf,098060966eacc1d14f932553a82feaff61d3afb9c4a94e04c1fdbae362764b82,2017,review,undetermined:GRBA
+012285,"January 17, 2017",2017,Washington,Numbers,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012285env.pdf,eb090f60129ae8add9c21a91f0665e8f4dc3e1201a83a6ab1b5b894e902f9a8f,2017,ok,
+012287,"June 2, 2017",2017,Benton,,3,,GRBA|IBAT|NLEB|OBEB,4,,,,,,,0,,,,https://media.ark.org/ardot/012287env.pdf,860ebf7fca36c7aacce6f710c9c0563be7942c69653800e0ee27ef0f597b4ef6,2017,review,"undetermined:GRBA,IBAT,NLEB,OBEB"
+012288,"June 12, 2017",2017,,Number PEN-0076(149),1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012288env.pdf,47d6c1772dd2c12defbb302b321c63e3b6bd0f0eb681a6d25ed2c6ee2f149efa,2017,review,no-county
+012289,"July 27, 2017",2017,Madison,,3,,GRBA|IBAT|NLEB|OBEB,4,,,,,,,0,,,,https://media.ark.org/ardot/012289env.pdf,1144b68a15b0d71f929adfaa64b6d2bc0c79ef8c32acb9525bd127f08524762f,2017,review,"undetermined:GRBA,IBAT,NLEB,OBEB"
+020484,"April 12, 2010",2010,Drew,,,,,0,,,,,,,0,,,,https://media.ark.org/ardot/020484env.pdf,deaada2c380de6847775cf3a0863bc4f3bbcce390ad24a8c28ea630e528b9b8c,2017,ok,
+020595,"May 3, 2017",2017,Chicot,Number HSIP-0009(33),3,0.72,,0,,,,,,,0,,,,https://media.ark.org/ardot/020595env.pdf,d7ba95e8e95b6edb7f4c64cafa6394ce2c26f0787b183682b8f3959738beb746,2017,ok,
+020636,"April 4, 2017",2017,,Numbers,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/020636env.pdf,9b0db3fcebb4991abba8a0a8be23c70efb40901f81dac29b296ba0c98ddd497d,2017,review,no-county
+020647,"June 1, 2017",2017,,Numbers,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/020647env.pdf,50e1930a1bd6b297aff9dab3475b9169f2cdb56d66caca3c797cdbfbf912b480,2017,review,no-county
+030486,"March 1, 2017",2017,Sevier,Number NHPE-0066(34),3,,,0,,,,,,,0,,,,https://media.ark.org/ardot/030486env.pdf,37883d9a2bb10651346a22be216f3fa90b0678a1f41f63d4c6d5866007add700,2017,ok,
