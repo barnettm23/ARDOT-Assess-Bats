@@ -68,10 +68,14 @@ RE_PUPSEASON = re.compile(
 )
 RE_LENGTH = re.compile(r"project\s+length\s+is\s+([\d.]+)\s+mile", re.I)
 
-# Determination sentences, longest/most specific first.
+# Determination sentences, longest/most specific first. The order is load
+# bearing: "likely to adversely affect" is a substring of "not likely to
+# adversely affect", and determinations() takes the FIRST pattern that matches.
+# With LAA ahead of NLAA every not-likely sentence resolved to LAA, inverting
+# the determination that decides any_bat_LAA. Keep NLAA first.
 DET_PATTERNS = [
-    ("LAA", re.compile(r"likely\s+to\s+adversely\s+affect", re.I)),
     ("NLAA", re.compile(r"not\s+likely\s+to\s+adversely\s+affect", re.I)),
+    ("LAA", re.compile(r"likely\s+to\s+adversely\s+affect", re.I)),
     ("NE", re.compile(r"\bno\s+effect\b", re.I)),
 ]
 
@@ -131,24 +135,33 @@ def sentences(body: str) -> list[str]:
     return re.split(r"(?<=[.;])\s+", flat)
 
 
-def determinations(body: str) -> tuple[dict, list[str]]:
-    """Map each bat code to NE / NLAA / LAA, plus the sentences used."""
-    out, used = {}, []
+def determinations(body: str) -> tuple[dict, list[str], dict]:
+    """Map each bat code to NE / NLAA / LAA.
+
+    Returns the verdicts, the sentences that produced them, and every sentence
+    mentioning each species whether or not a verdict matched. That third value
+    is what a reviewer needs: a species reaches the queue precisely because no
+    verdict was resolved, so the sentences that did match are the empty set.
+    """
+    out, used, mentions = {}, [], {}
     for sent in sentences(body):
         low = sent.lower()
         present = [code for name, code in BATS.items() if name in low]
         if not present:
             continue
+        clean = sent.strip()
+        for code in present:
+            mentions.setdefault(code, []).append(clean)
         verdict = next((v for v, pat in DET_PATTERNS if pat.search(sent)), None)
         if not verdict:
             continue
-        used.append(sent.strip())
+        used.append(clean)
         for code in present:
             # LAA wins over a weaker verdict found elsewhere in the document.
             rank = {"NE": 0, "NLAA": 1, "LAA": 2}
             if code not in out or rank[verdict] > rank[out[code]]:
                 out[code] = verdict
-    return out, used
+    return out, used, mentions
 
 
 def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
@@ -201,7 +214,7 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
     rec.bats_listed = "|".join(listed)
     rec.n_bats_listed = str(len(listed))
 
-    dets, used = determinations(body)
+    dets, used, mentions = determinations(body)
     for code, verdict in dets.items():
         setattr(rec, f"det_{code}", verdict)
     rec.any_bat_LAA = str(int("LAA" in dets.values()))
@@ -211,11 +224,19 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
     if undetermined:
         notes.append(f"undetermined:{','.join(undetermined)}")
         for code in undetermined:
+            # Hand over the sentences naming THIS species, whichever way they
+            # fell. Falling back to `used` would be empty by construction here,
+            # and an empty sentence column defeats the point of the queue.
+            src = mentions.get(code)
             queue.append(
                 {
                     "job_id": rec.job_id,
                     "reason": f"no-determination-{code}",
-                    "sentence": " | ".join(used)[:1500],
+                    "sentence": (
+                        " | ".join(src)[:1500]
+                        if src
+                        else "species named in document but in no parsed sentence"
+                    ),
                 }
             )
     if rec.any_bat_LAA == "1" and not rec.acres_cleared:

@@ -9,6 +9,10 @@ on:
         description: "Max PDFs to fetch (0 = no limit, full harvest)"
         required: false
         default: "10"
+      min_year:
+        description: "Only fetch documents posted under this index year or later"
+        required: false
+        default: "2021"
 
 permissions:
   contents: write
@@ -49,6 +53,7 @@ jobs:
         env:
           DISPATCH_LIMIT: ${{ github.event.inputs.limit }}
           SCHEDULED_LIMIT: "25"
+          MIN_INDEX_YEAR: ${{ github.event.inputs.min_year || '2021' }}
         run: |
           LIMIT="${DISPATCH_LIMIT:-$SCHEDULED_LIMIT}"
           if [ "$LIMIT" = "0" ]; then

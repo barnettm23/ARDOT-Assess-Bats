@@ -9,3 +9,12 @@ job_id,doc_date,doc_year,county,fap,ce_tier,project_length_mi,bats_listed,n_bats
 020636,"April 4, 2017",2017,,Numbers,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/020636env.pdf,9b0db3fcebb4991abba8a0a8be23c70efb40901f81dac29b296ba0c98ddd497d,2017,review,no-county
 020647,"June 1, 2017",2017,,Numbers,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/020647env.pdf,50e1930a1bd6b297aff9dab3475b9169f2cdb56d66caca3c797cdbfbf912b480,2017,review,no-county
 030486,"March 1, 2017",2017,Sevier,Number NHPE-0066(34),3,,,0,,,,,,,0,,,,https://media.ark.org/ardot/030486env.pdf,37883d9a2bb10651346a22be216f3fa90b0678a1f41f63d4c6d5866007add700,2017,ok,
+012359,"November 25, 2020",2020,Job Name,Numbers,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012359env.pdf,d6b7d7d84c535f6fd1ce279e69c49149edb287eb5d37dfcad880d77e9e47842f,2021,ok,
+012375,"September 1, 2020",2020,,Number NHPP-0076(226),1,,IBAT|NLEB,2,,,,,,,0,,,,https://media.ark.org/ardot/012375env.pdf,23ef3545b6fb176a4366653735bd340a0697c70d5e8f6fa22c703739c98d7eeb,2021,review,"no-county;undetermined:IBAT,NLEB"
+012376,"September 1, 2020",2020,,Number NHPP-0076(227),1,,NLEB,1,,,,,,,0,,,,https://media.ark.org/ardot/012376env.pdf,85bc86080cb99a234edec854d9673e68b08de92de86980f1e3d9cba5e08f8174,2021,review,no-county;undetermined:NLEB
+012377,"May 12, 2021",2021,Benton,NHPP-0076 (228),3,,GRBA|IBAT|NLEB|OBEB,4,NE,NE,NE,NE,,,0,,,,https://media.ark.org/ardot/012377env.pdf,d365e01b47b1ed3afd086ca429cf155765008aeed94117d34fcc7b964d715171,2021,ok,
+012378,"February 19, 2021",2021,,Number NHPP-0076(229),1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012378env.pdf,357b0d0838aec11a935e52e9979c68a1c3b6416508802720089e12bdb91d1020,2021,review,no-county
+012379,"September 10, 2020",2020,,Number,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012379env-1.pdf,3bdabd7b4e614fb292491651ddb58400c93b45c5c11f4db111335f3eeb69d6c4,2021,review,no-county
+012380,"December 3, 2020",2020,,Numbers,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012380env.pdf,6d1378fc4f14bb031485f251ad02c3c56aa9e27ce4c95f68230d86d928ced9f2,2021,review,no-county
+012382,"March 9, 2021",2021,,Number STPF-0076-233,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012382env.pdf,47205729767ce71490775b2f4cb42648787add7c0f3e742fa310e99d930c2b5d,2021,review,no-county
+012383,"March 9, 2021",2021,,Number STPF-0076-234,1,,,0,,,,,,,0,,,,https://media.ark.org/ardot/012383env.pdf,be36417a048b6f175210792fb44667a20011297d794c72e10c0f4c5352342197,2021,review,no-county

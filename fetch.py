@@ -9,6 +9,7 @@ ARDOT is a small state agency, not a CDN.
 
 import csv
 import hashlib
+import os
 import sys
 import time
 from pathlib import Path
@@ -20,6 +21,18 @@ MANIFEST = ROOT / "data" / "manifest.csv"
 PDF_DIR = ROOT / "cache" / "pdf"
 USER_AGENT = "OzarkBioacoustics-research/0.1 (contact: michael@seismicagency.com)"
 DELAY_SECONDS = 1.0
+
+# Fetch selection only -- never analysis. The live index runs 2017-2026, wider
+# than the 2021-present study period, and the manifest sorts by index_year, so
+# an unfiltered `fetch.py 10` samples the OLDEST documents and tells you nothing
+# about the years the business case rests on.
+#
+# index_year is the posting year and must never drive an annual series (trap 3
+# in CLAUDE.md). It is sound as a fetch filter for a different reason: a
+# document cannot be posted before it is written, so index_year >= Y is a
+# superset of doc_year >= Y and excludes no in-scope document. The manifest
+# still records every year for provenance; this only decides what to download.
+MIN_INDEX_YEAR = int(os.environ.get("MIN_INDEX_YEAR", "2021"))
 
 
 def local_path(row: dict) -> Path:
@@ -66,9 +79,20 @@ def main(limit: int | None = None) -> None:
         fields, rows = reader.fieldnames, list(reader)
 
     todo = [r for r in rows if not (local_path(r).exists() and r.get("sha256"))]
+
+    def in_scope(row: dict) -> bool:
+        try:
+            return int(row["index_year"]) >= MIN_INDEX_YEAR
+        except (KeyError, TypeError, ValueError):
+            return True  # unparseable year: fetch it rather than lose it
+
+    out_of_scope = len(todo) - len(todo := [r for r in todo if in_scope(r)])
     if limit:
         todo = todo[:limit]
-    print(f"{len(todo)} to fetch of {len(rows)} in manifest")
+    print(
+        f"{len(todo)} to fetch of {len(rows)} in manifest "
+        f"(index_year >= {MIN_INDEX_YEAR}; {out_of_scope} older skipped)"
+    )
 
     for i, row in enumerate(todo, 1):
         fetch_one(row)
