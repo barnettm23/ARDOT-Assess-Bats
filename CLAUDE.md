@@ -150,6 +150,81 @@ Other caveats: NBI omits spans under 20 ft, so small culvert crossings are
 undercounted; `route_number` is blank on 104 rows (mostly county roads with no
 route designation); the release lags field inspection by about a year.
 
+### Stage 5 — costs (`costs.py`)
+
+```bash
+python costs.py                # data/bridges.csv -> data/bridges_costed.csv
+python costs.py --index-file F # swap the deflator
+python tests/test_costs.py     # 11 offline checks
+```
+
+Adds, adjacent, to every bridge:
+
+| column | meaning |
+|---|---|
+| `est_original_cost_usd` | **before** — modelled build cost in the year built, in *that year's* dollars |
+| `est_rebuild_today_usd` | **after** — modelled cost to rebuild the same structure now |
+| `cost_ratio_today_to_original` | the multiple between them |
+| `deck_area_sqft`, `rate_today_per_sqft` | the working |
+| `cost_index_built`, `cost_index_today` | the deflator values used |
+| `cost_basis_note` | why a row is blank or qualified |
+
+**Both columns are models, not records. The NBI has no original-cost field.**
+Item 96 is the cost of *proposed work*: 2,050 of the 2,058 rows carrying it
+also carry a work code, and a bridge built in 1934 shows $500k there. Original
+cost therefore cannot be read; it can only be estimated.
+
+**Rate calibration imports no outside cost assumption.** It comes from ARDOT's
+own replacement estimates for its own bridges — the ~1,480 structures with both
+a declared replacement and a cost — divided by deck area. Cost per square foot
+falls steeply with size, measured live:
+
+```
+under 1,000 sq ft  $361     5,000-10,000   $114
+1,000-2,500        $202    10,000-25,000    $88
+2,500-5,000        $151    25,000+          $70
+```
+
+A power-law fit tracks the middle but underestimates the biggest bridges by 23%
+($54 against $70), so the module interpolates log-linearly between those
+observed medians instead and clamps past the ends. Material is deliberately
+unused: once size is controlled the signal is weak and confounded.
+
+Deflation uses `data/cost_index.csv`, an ENR Construction Cost Index table
+(1913 = 100) interpolated geometrically between anchors.
+
+#### Measured 2026-09-20, full file
+
+```
+rows 12,974   rebuild estimated 10,037   original estimated 10,025
+rebuild today: total $7.7B, median $477,742
+original: median $108,466 (each in its OWN year's dollars)
+today/original ratio: p25 2.4x  median 4.5x  p75 16.7x
+```
+
+Uncosted: **2,937 culverts**, every one flagged `culvert-no-deck-width`. The
+NBI codes deck width 0 for culverts by convention, so deck area cannot be
+formed. Costing them needs item 51 (roadway width) and a culvert-specific rate;
+neither exists here yet. 12 rows predate the index and are flagged, not guessed.
+
+#### Four things that will burn you
+
+1. **`data/cost_index.csv` is UNVERIFIED.** Its values were written from
+   recollection of the ENR CCI series, not transcribed from an ENR publication,
+   and the 2025–26 rows are extrapolated. The index alone sets the scale of
+   every `est_original_cost_usd`, and it drives the 70x+ ratios on pre-war
+   bridges. Replace it with a primary-source series before any figure leaves
+   the repo. `costs.py` prints a warning every run.
+2. **Never sum `est_original_cost_usd`.** Each value is in a different year's
+   dollars, 1913 through 2024. The total is meaningless. `report()` refuses to
+   print one, for the same reason CLAUDE.md refuses to sum `mitigation_usd`.
+3. **Per-row error is large.** Actual over predicted on the calibration set runs
+   0.73 at the 10th percentile to 1.63 at the 90th. The column is an aggregate
+   instrument. Deck area ignores foundation depth, span arrangement and site
+   conditions, which are what actually drive bridge cost.
+4. **The in-sample fit is not validation.** The 0.92 median actual/estimated is
+   measured on the very rows used to calibrate. No held-out test has been run.
+
 Every stage is idempotent and cached. Re-running fetches only what is new.
 
 ## Four traps, all confirmed against the live index

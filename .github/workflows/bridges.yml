@@ -33,7 +33,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Offline parser checks
-        run: python tests/test_bridges.py
+        run: |
+          python tests/test_bridges.py
+          python tests/test_costs.py
 
       - name: Restore NBI cache
         uses: actions/cache@v4
@@ -52,11 +54,16 @@ jobs:
             python bridges.py "$LIMIT"
           fi
 
+      # Estimates only -- the NBI carries no original construction cost. See the
+      # costs.py docstring, and note data/cost_index.csv is unverified.
+      - name: Estimate original and rebuild costs
+        run: python costs.py
+
       - name: Commit derived data
         run: |
           git config user.name  "ardot-bot"
           git config user.email "actions@github.com"
-          git add data/bridges.csv data/bridges_summary.csv
+          git add data/bridges.csv data/bridges_summary.csv data/bridges_costed.csv
           if git diff --staged --quiet; then
             echo "no changes to commit"
           else
@@ -72,4 +79,5 @@ jobs:
           path: |
             data/bridges.csv
             data/bridges_summary.csv
+            data/bridges_costed.csv
           if-no-files-found: warn

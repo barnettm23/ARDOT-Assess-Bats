@@ -51,6 +51,25 @@ Two caveats: item 75A work-proposed is intent recorded at inspection, not a
 funded programme, and item 97 year-of-improvement is populated on 36 of 12,974
 rows -- so this is a cross-section of the pipeline, never an annual series.
 
+A fifth stage estimates what each bridge cost to build and what it would cost
+to rebuild now, side by side:
+
+```
+python costs.py               # data/bridges.csv -> data/bridges_costed.csv
+python tests/test_costs.py    # offline checks
+```
+
+`est_original_cost_usd` (year-built dollars) sits next to
+`est_rebuild_today_usd` (today's dollars), with the deck area, rate and index
+values beside them so every figure can be recomputed by hand. The rate is
+calibrated from ARDOT's own replacement estimates rather than an outside
+assumption; the deflator is an ENR Construction Cost Index table.
+
+**Both columns are models, not records.** The NBI has no original-cost field,
+per-row error is wide, `data/cost_index.csv` is unverified, and
+`est_original_cost_usd` must never be summed because each value is in a
+different year's dollars. See CLAUDE.md, "Stage 5 -- costs".
+
 ## Four traps this handles
 
 1. **URLs are not constructible.** Observed filenames include `110751_env.pdf`,
