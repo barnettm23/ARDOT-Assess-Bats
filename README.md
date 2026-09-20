@@ -30,6 +30,18 @@ python parse.py       # PDFs -> data/records.csv + data/review_queue.csv
 
 Everything is idempotent. Re-running fetches only what is new.
 
+A separate stage maps every public-road bridge in Arkansas from the FHWA
+National Bridge Inventory, with FHWA Good/Fair/Poor condition, a map colour,
+and the owner's declared work plan -- the replacement pipeline:
+
+```
+python bridges.py 100         # NBI Arkansas file -> data/bridges.csv + data/bridges_summary.csv
+python tests/test_bridges.py  # offline checks
+```
+
+Dispatch the `bridges` workflow to run it on a GitHub runner (`limit=0` for all
+~12,700 rows). See CLAUDE.md, "Stage 4 -- bridges", for the schema.
+
 ## Four traps this handles
 
 1. **URLs are not constructible.** Observed filenames include `110751_env.pdf`,
