@@ -124,7 +124,7 @@ REPLACEMENT_CODES = {31, 32, 33}
 # Official FHWA condition schema, plus a color for the map.
 CONDITION_COLOR = {"Good": "#2e7d32", "Fair": "#f9a825", "Poor": "#c62828", "": "#9e9e9e"}
 
-ITEM_RE = re.compile(r"_(\d{3}[A-C]?)$")
+ITEM_RE = re.compile(r"_(\d{3}[A-E]?)$")
 
 
 # --------------------------------------------------------------------------

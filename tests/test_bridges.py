@@ -90,6 +90,16 @@ def test_header_resolution_by_item_number():
     col = bridges.item_map(["LAT_016", "SOME_RENAMED_THING_017", "DECK_COND_058", "BRIDGE_CONDITION"])
     assert col["016"] == "LAT_016" and col["017"] == "SOME_RENAMED_THING_017"
     assert col["BRIDGE_CONDITION"] == "BRIDGE_CONDITION"
+    # Items 005D and 005E exist; the first live run lost route_number because
+    # the suffix class stopped at C.
+    col = bridges.item_map(["ROUTE_NUMBER_005D", "DIRECTION_005E"])
+    assert col["005D"] == "ROUTE_NUMBER_005D" and col["005E"] == "DIRECTION_005E"
+
+
+def test_route_number_populated():
+    r = rows()
+    assert r["000000000005612"]["route_number"] == "56"
+    assert r["000000000010231"]["route_number"] == "40"
 
 
 if __name__ == "__main__":
