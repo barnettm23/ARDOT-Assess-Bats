@@ -98,11 +98,57 @@ poor-over-water, state-owned-poor, work-proposed, replacement-proposed. A Poor
 state-owned bridge over water in an Ozark county is the archetype of a future
 bat determination.
 
-Caveats: NBI omits spans under 20 ft; some coordinates are zero placeholders
-(`coord_note=missing`, row kept); the release lags inspection by about a year.
-Parser verified only against the synthetic fixture until the workflow runs —
-column names were written from the FHWA Coding Guide, resolved by trailing item
-number so a rename does not break them, but a real-file check is still owed.
+#### Measured 2026-09-20 against the live NBI 2024 Arkansas file
+
+Full run, all rows, workflow run 2. **12,974 bridges across all 75 counties.**
+
+```
+Good 5,940    Fair 6,330    Poor 704    unrated 0
+over water 11,977 (92%)     coordinates missing 4
+owners: state 7,346  county 4,275  city 1,107  USFS 132  other 114
+year_built 1860-2023
+```
+
+Two results that matter for trust:
+
+- **Computed condition matched FHWA's own `BRIDGE_CONDITION` on 12,974 of
+  12,974 rows.** Zero disagreements. The Good/Fair/Poor derivation is correct.
+- Only **4** rows have missing coordinates and **0** land outside the state
+  bounding box. Coordinate decoding is sound.
+
+The pipeline numbers:
+
+| signal | count |
+|---|---|
+| Poor | 704 |
+| Poor **and** over water | 659 |
+| Poor and state-owned | 386 |
+| replacement proposed (75A ∈ 31/32/33) | 1,532 |
+| replacement proposed and over water | 1,459 |
+
+Ozark and NW Arkansas counties (21 of 75) hold **3,410 bridges, 222 Poor, 213
+Poor-over-water and 411 replacements proposed** — a quarter of the state's
+inventory and a quarter of its declared replacement pipeline.
+
+Highest Poor-over-water counts: Poinsett 31, Washington 31, Polk 28,
+Mississippi 26, Madison 23. Highest replacement-proposed: Pulaski 121,
+Garland 82, Polk 73, Hot Spring 65.
+
+**Two traps in these columns.**
+
+1. **`work_proposed` is intent recorded at inspection, not a funded programme.**
+   Item 75A is what the inspector or owner thinks the structure needs. It is not
+   a let schedule and carries no obligation. Treat 1,532 as a ceiling on the
+   replacement pipeline, not a forecast.
+2. **`year_of_improvement` (item 97) is populated on 36 of 12,974 rows.**
+   Effectively empty. **The NBI cannot date the pipeline.** You get the stock of
+   candidate projects, never the annual flow. Any per-year series still has to
+   come from `records.csv` `doc_year` or from an ARDOT letting schedule; this
+   file is a cross-section, not a time series. Do not divide 1,532 by five.
+
+Other caveats: NBI omits spans under 20 ft, so small culvert crossings are
+undercounted; `route_number` is blank on 104 rows (mostly county roads with no
+route designation); the release lags field inspection by about a year.
 
 Every stage is idempotent and cached. Re-running fetches only what is new.
 
