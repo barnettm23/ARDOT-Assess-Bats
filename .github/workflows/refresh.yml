@@ -33,12 +33,42 @@ jobs:
       - name: Install Python deps
         run: pip install -r requirements.txt
 
+      # The PDF cache is what keeps us off ARDOT's server. Getting the key
+      # wrong is not a performance problem, it is an etiquette problem.
+      #
+      # The old key was ardot-pdfs-${{ hashFiles('data/manifest.csv') }} with
+      # restore-keys: ardot-pdfs-. On the very first run no manifest existed
+      # yet, hashFiles returned empty, and the cache was saved under the bare
+      # key "ardot-pdfs-". That is an EXACT match for the restore-key, and an
+      # exact restore-key match beats every prefix match -- so that first
+      # 10-PDF cache permanently shadowed every later one. Four runs in a row
+      # restored those same 10 PDFs and re-downloaded everything else.
+      #
+      # Keying on the manifest was wrong anyway: fetch.py rewrites it with new
+      # sha256 values, so the key never matches on the next run by construction.
+      #
+      # github.run_id is never empty and never repeats, so no cache can collide
+      # with the restore-key prefix again. Each run saves a fresh cache and
+      # restores the most recent one. The v2 prefix sidesteps the poisoned
+      # ardot-pdfs- entry without needing to delete it.
+      # Restore and save are split deliberately. The combined action saves in a
+      # post step that is SKIPPED when the job fails, so a git conflict in the
+      # commit step three steps later threw away PDFs we had just spent real
+      # requests downloading. Saving explicitly with if: always() banks the
+      # download the moment it is paid for.
       - name: Restore PDF cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: cache
-          key: ardot-pdfs-${{ hashFiles('data/manifest.csv') }}
-          restore-keys: ardot-pdfs-
+          key: ardot-pdf-cache-v2-${{ github.run_id }}
+          restore-keys: ardot-pdf-cache-v2-
+
+      # Census county codes, fetched not hardcoded. Non-fatal: if the source
+      # moves, county_fips stays blank and parse.py flags it, which is a
+      # visible gap rather than a wrong code joined to the wrong county.
+      - name: County FIPS reference
+        continue-on-error: true
+        run: python fetch_fips.py
 
       - name: Harvest index
         run: python harvest.py
@@ -64,20 +94,44 @@ jobs:
             python fetch.py "$LIMIT"
           fi
 
+      # Bank the downloads immediately, and regardless of what follows.
+      - name: Save PDF cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: ardot-pdf-cache-v2-${{ github.run_id }}
+
       - name: Parse
         run: python parse.py
 
       - name: Commit derived data
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
           git config user.name  "ardot-bot"
           git config user.email "actions@github.com"
           git add data/
           if git diff --staged --quiet; then
             echo "no changes to commit"
-          else
-            git commit -m "refresh: $(date -u +%Y-%m-%d)"
-            git push
+            exit 0
           fi
+          git commit -m "refresh: $(date -u +%Y-%m-%d)"
+          # The branch can move while a run is in flight -- someone pushing, or
+          # another run finishing. A bare push then fails non-fast-forward and
+          # aborts the job. This commit only ever touches data/, so rebasing
+          # onto whatever landed is safe and loses nothing.
+          for attempt in 1 2 3; do
+            if git pull --rebase --autostash origin "$BRANCH" \
+               && git push origin "HEAD:$BRANCH"; then
+              echo "derived data pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push attempt $attempt failed; retrying"
+            sleep 5
+          done
+          echo "could not push derived data after 3 attempts" >&2
+          exit 1
 
       - name: Upload review queue
         if: always()
