@@ -24,6 +24,8 @@ import shutil
 from datetime import date
 from pathlib import Path
 
+import parse
+
 ROOT = Path(__file__).resolve().parent
 RECORDS = ROOT / "data" / "records.csv"
 REVIEW = ROOT / "data" / "review_queue.csv"
@@ -41,8 +43,9 @@ SCHEMA = [
     ("county_fips", "text", "5-digit Census FIPS code for county. Blank where county is blank", "05001-05149"),
     ("routes", "text", "Highway numbers named in the document, pipe-delimited", ""),
     ("waterways", "text", "Named water features crossed, pipe-delimited", ""),
-    ("coordinates", "text", "Coordinates ONLY where the document itself states them. Almost always blank -- see README", ""),
+    ("coordinates", "text", "Coordinates as stated in the document. USE ONLY WITH coord_confidence -- see README", ""),
     ("coord_format", "text", "Notation of the coordinates column", "decimal_degrees | degrees_minutes_seconds | utm"),
+    ("coord_confidence", "text", "'document-specific' = the value does not repeat across documents (necessary, NOT sufficient, evidence it is the project location). 'repeated-across-documents' = the same value appears in unrelated PDFs and CANNOT be a project location -- do not map these", "document-specific | repeated-across-documents | (blank)"),
     ("fap", "text", "Federal Aid Project number, where stated. Links the project to federal funding records", ""),
     ("ce_tier", "integer", "Categorical Exclusion tier", "1 | 2 | 3"),
     ("project_length_mi", "decimal", "Project length in miles, where stated", ""),
@@ -131,18 +134,38 @@ are there are real, not because the coverage supports analysis. Project cost
 for these jobs has to come from a different source -- ARDOT bid tabulations or
 the STIP, both public.
 
-LOCATION PRECISION
-County is the finest location this source supports. ARDOT environmental
-documents identify projects by job number, route and county, plus prose
-descriptions of the feature crossed; they do not carry coordinates. The
-coordinates column is populated only where a document states them directly,
-which is rare -- see the coverage line below. routes and waterways are
-provided so a project can be placed by hand or against ARDOT's own GIS.
-County centroids were deliberately NOT synthesized: they would look like
-project locations and are not.
+LOCATION -- READ BEFORE MAPPING ANYTHING
+County is the reliable location field. It is validated against the 75
+Arkansas county names and carries a Census FIPS code; where no Arkansas
+county could be confirmed the field is blank rather than guessed.
 
-  records with stated coordinates: {n_coords} of {n_records}
-  records with a validated county: {n_county} of {n_records}
+  records with a validated county:  {n_county} of {n_records}
+  records with county_fips:         {n_fips} of {n_records}
+
+COORDINATES ARE PARTLY CONTAMINATED. {n_coords} records carry a
+coordinate-looking value, but only {n_coord_distinct} DISTINCT values exist
+among them, and {n_coord_bad} of the {n_coords} share a value with an
+unrelated source PDF. Those cannot be project locations -- the most common
+one sits at the geographic centre of Arkansas and appears on projects in two
+non-adjacent counties. It is a locator map or a default map centre.
+
+Use coord_confidence:
+  document-specific          {n_coord_ok} records -- value unique to its
+                             source document. This is a NECESSARY condition,
+                             not a verified one. It has NOT been confirmed to
+                             be the project's location. Spot-check before use.
+  repeated-across-documents  {n_coord_bad} records -- DO NOT MAP.
+
+routes and waterways are the honest locational detail: ARDOT names projects
+by route and the feature crossed ("Little Piney Creek Str. & Apprs., Hwy 56"),
+which with a county places a bridge project precisely by hand or against
+ARDOT's own GIS.
+
+  records with routes:    {n_routes} of {n_records}
+  records with waterways: {n_waterways} of {n_records}
+
+County centroids were deliberately NOT synthesized. They would look like
+project locations and are not.
 
 KNOWN DEFECTS
 - Some PDFs embed subsetted fonts with no ToUnicode map. pdftotext returns
@@ -170,6 +193,13 @@ def main() -> None:
         records = list(csv.DictReader(fh))
     if not records:
         raise SystemExit("no records -- run the pipeline first")
+
+    # Same function parse.py uses, so the published flag and the repository's
+    # own flag can never disagree. Applied here too because the check is
+    # cross-record and records.csv may predate the parser change.
+    for r in records:
+        r.setdefault("coord_confidence", "")
+    parse.flag_coordinate_confidence(records)
 
     OUT.mkdir(parents=True, exist_ok=True)
     fields = [c[0] for c in SCHEMA]
@@ -203,6 +233,12 @@ def main() -> None:
         "n_county": sum(1 for r in records if r.get("county")),
         "n_cost": sum(1 for r in records if r.get("project_cost_usd")),
         "n_row": sum(1 for r in records if r.get("row_cost_usd")),
+        "n_fips": sum(1 for r in records if r.get("county_fips")),
+        "n_routes": sum(1 for r in records if r.get("routes")),
+        "n_waterways": sum(1 for r in records if r.get("waterways")),
+        "n_coord_distinct": len({r["coordinates"] for r in records if r.get("coordinates")}),
+        "n_coord_ok": sum(1 for r in records if r.get("coord_confidence") == "document-specific"),
+        "n_coord_bad": sum(1 for r in records if r.get("coord_confidence") == "repeated-across-documents"),
         "repo": "https://github.com/barnettm23/ARDOT-Assess-Bats",
         "contact": "michael@seismicagency.com",
     }

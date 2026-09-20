@@ -1,0 +1,37 @@
+column,type,definition,domain
+job_id,text,"ARDOT job number, as printed in the source index",
+doc_date,text,Date printed inside the PDF. May be month-and-year only where the document carries no day,
+doc_year,integer,Year from doc_date. AUTHORITATIVE for any annual series,2013-2026
+index_year,integer,"Year heading the document was posted under. PROVENANCE ONLY -- posting year, not document date",2021-2026
+county,text,"Arkansas county, validated against the 75 county names. Blank where none could be confirmed",75 Arkansas counties
+county_fips,text,5-digit Census FIPS code for county. Blank where county is blank,05001-05149
+routes,text,"Highway numbers named in the document, pipe-delimited",
+waterways,text,"Named water features crossed, pipe-delimited",
+coordinates,text,Coordinates as stated in the document. USE ONLY WITH coord_confidence -- see README,
+coord_format,text,Notation of the coordinates column,decimal_degrees | degrees_minutes_seconds | utm
+coord_confidence,text,"'document-specific' = the value does not repeat across documents (necessary, NOT sufficient, evidence it is the project location). 'repeated-across-documents' = the same value appears in unrelated PDFs and CANNOT be a project location -- do not map these",document-specific | repeated-across-documents | (blank)
+fap,text,"Federal Aid Project number, where stated. Links the project to federal funding records",
+ce_tier,integer,Categorical Exclusion tier,1 | 2 | 3
+project_length_mi,decimal,"Project length in miles, where stated",
+bats_listed,text,"Listed bat species on the IPaC species list, pipe-delimited species codes",GRBA|IBAT|NLEB|OBEB|TCB|LBB
+n_bats_listed,integer,Count of bats_listed,0-6
+det_GRBA,text,"Effect determination, gray bat (Myotis grisescens)",NE | NLAA | LAA
+det_IBAT,text,"Effect determination, Indiana bat (Myotis sodalis)",NE | NLAA | LAA
+det_NLEB,text,"Effect determination, northern long-eared bat (Myotis septentrionalis)",NE | NLAA | LAA
+det_OBEB,text,"Effect determination, Ozark big-eared bat (Corynorhinus townsendii ingens)",NE | NLAA | LAA
+det_TCB,text,"Effect determination, tricolored bat (Perimyotis subflavus)",NE | NLAA | LAA
+det_LBB,text,"Effect determination, little brown bat (Myotis lucifugus)",NE | NLAA | LAA
+det_source,text,HOW the det_* values were obtained. READ THE README BEFORE USING det_* COLUMNS,direct | inferred | mixed | (blank)
+any_bat_LAA,integer,"1 if any bat reached likely-to-adversely-affect. 0 means NOT ESTABLISHED where det_source is blank, not 'no effect'",0 | 1
+survey_status,text,Whether a bat survey was conducted or required for this project. Generic regulatory advisories are excluded,conducted | required | mentioned | (blank)
+survey_types,text,"Survey methods named, pipe-delimited",presence/absence | mist-net | acoustic | emergence | habitat assessment
+acres_cleared,decimal,"Acres of suitable habitat cleared, where stated",
+mitigation_usd,decimal,In-lieu fee contribution in US dollars. NOT consultant revenue -- see README,
+mitigation_ratio,text,"Mitigation ratios applied, pipe-delimited",
+project_cost_usd,decimal,"Total project cost in US dollars WHERE STATED. Very sparse -- these are NEPA compliance documents, not cost estimates; see README",
+row_cost_usd,decimal,Right-of-way cost in US dollars where stated. Very sparse,
+pup_season_restriction,text,"Seasonal tree-clearing prohibition window, where stated",
+source_url,text,Permanent URL of the source PDF. Every row is independently verifiable,
+sha256,text,SHA-256 of the source PDF as fetched. Detects silent replacement upstream,
+parse_status,text,Extraction outcome for this record,ok | review | empty-or-scanned
+parse_notes,text,Semicolon-delimited extraction flags,

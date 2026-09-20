@@ -232,6 +232,7 @@ class Record:
     waterways: str = ""     # pipe-delimited named features crossed
     coordinates: str = ""   # only if the document actually states them
     coord_format: str = ""  # decimal_degrees / degrees_minutes_seconds / utm
+    coord_confidence: str = ""  # document-specific / repeated-across-documents
     fap: str = ""
     ce_tier: str = ""
     project_length_mi: str = ""
@@ -310,6 +311,44 @@ def _apply(det: Determination, code: str, verdict: str, how: str) -> None:
         return  # LAA found anywhere outranks a weaker verdict of the same kind
     det.verdicts[code] = verdict
     det.source[code] = how
+
+
+def flag_coordinate_confidence(records: list[dict]) -> None:
+    """Mark coordinates that cannot be project-specific. Mutates in place.
+
+    A coordinate appearing in several DIFFERENT source PDFs is not a project
+    location -- it is a locator map, a default map centre, or a district
+    office. Measured on the first full corpus: 282 records carried a
+    coordinate but only 76 distinct values existed, and 166 of the 282 shared
+    a value across different documents. The most common one sat at the
+    geographic centre of Arkansas and appeared on projects in two
+    non-adjacent counties.
+
+    Repetition WITHIN one document is expected and fine -- ARDOT serves a
+    single PDF for several job numbers, so those rows legitimately share a
+    location.
+
+    "document-specific" is a necessary condition, not a verified one: it means
+    the value does not repeat across documents, NOT that it has been confirmed
+    to be the project's location.
+    """
+    sources: dict[str, set] = {}
+    for r in records:
+        if r.get("coordinates"):
+            sources.setdefault(r["coordinates"], set()).add(r.get("sha256", ""))
+
+    for r in records:
+        coord = r.get("coordinates")
+        if not coord:
+            continue
+        if len(sources[coord]) > 1:
+            r["coord_confidence"] = "repeated-across-documents"
+            r["parse_notes"] = ";".join(
+                filter(None, [r.get("parse_notes", ""), "coord-not-document-specific"])
+            )
+            r["parse_status"] = "review"
+        else:
+            r["coord_confidence"] = "document-specific"
 
 
 def load_county_fips() -> dict:
@@ -684,6 +723,9 @@ def main() -> None:
                 }
             )
         unique.append(r)
+
+    # Cross-record check: needs the whole corpus, so it runs after dedup.
+    flag_coordinate_confidence(unique)
 
     RECORDS.parent.mkdir(parents=True, exist_ok=True)
     with RECORDS.open("w", newline="", encoding="utf-8") as fh:
