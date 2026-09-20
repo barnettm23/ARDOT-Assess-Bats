@@ -1,0 +1,75 @@
+name: bridges
+
+# Fetch the Arkansas National Bridge Inventory file and rebuild
+# data/bridges.csv + data/bridges_summary.csv. Separate from `refresh` because
+# it hits FHWA, not ARDOT, and one file a year is all it ever needs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max NBI rows to parse (0 = all ~12,700)"
+        required: false
+        default: "100"
+      nbi_year:
+        description: "FHWA release year (legacy format through 2024; 2025+ is SNBI)"
+        required: false
+        default: "2024"
+
+permissions:
+  contents: write
+
+jobs:
+  bridges:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Offline parser checks
+        run: python tests/test_bridges.py
+
+      - name: Restore NBI cache
+        uses: actions/cache@v4
+        with:
+          path: cache/nbi
+          key: nbi-${{ github.event.inputs.nbi_year || '2024' }}
+
+      - name: Fetch and parse NBI
+        env:
+          NBI_YEAR: ${{ github.event.inputs.nbi_year || '2024' }}
+          LIMIT: ${{ github.event.inputs.limit || '100' }}
+        run: |
+          if [ "$LIMIT" = "0" ]; then
+            python bridges.py
+          else
+            python bridges.py "$LIMIT"
+          fi
+
+      - name: Commit derived data
+        run: |
+          git config user.name  "ardot-bot"
+          git config user.email "actions@github.com"
+          git add data/bridges.csv data/bridges_summary.csv
+          if git diff --staged --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "bridges: NBI ${NBI_YEAR:-2024} $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridges
+          path: |
+            data/bridges.csv
+            data/bridges_summary.csv
+          if-no-files-found: warn

@@ -63,7 +63,46 @@ The GitHub Actions workflow exposes this as the `min_year` dispatch input, and
 there means an unbounded ~1,200-document fetch.
 
 Flat layout: scripts at repo root, `ROOT = Path(__file__).resolve().parent`.
-Only `.github/workflows/refresh.yml` is nested (GitHub requires it).
+Only `.github/workflows/*.yml` is nested (GitHub requires it).
+
+### Stage 4 — bridges (`bridges.py`, workflow `bridges`)
+
+```bash
+python bridges.py 100                          # NBI Arkansas file -> data/bridges.csv + bridges_summary.csv
+python bridges.py --file tests/fixtures/nbi_sample.txt   # offline parse, for tests
+python tests/test_bridges.py                   # 10 offline checks against the fixture
+```
+
+Source is the **FHWA National Bridge Inventory**, Arkansas state file
+(`fhwa.dot.gov/bridge/nbi/<year>/delimited/AR<yy>.txt`, ~12,700 rows, every
+public-road bridge over 20 ft, state and local). Independent of ARDOT's index;
+one file per year. `NBI_YEAR` defaults to **2024**, the last legacy-format
+release — 2025+ submittals use the SNBI specification with different item
+codes and this parser will abort loudly on them.
+
+Why it is here: "Str. & Apprs." jobs are the bulk of the bat-triggering
+projects and bridges over water are gray-bat roosts. NBI gives each a
+coordinate, a **condition** and the owner's own declared plan.
+
+Condition columns follow FHWA's official Good/Fair/Poor schema: the lowest of
+deck/superstructure/substructure (items 58/59/60, or culvert 62) — **7–9 Good,
+5–6 Fair, ≤4 Poor**. `condition` is computed from the components;
+`fhwa_condition` is FHWA's own field, and any disagreement is written to
+`parse_notes`. `condition_color` is a hex for the map (green/amber/red, grey
+unrated). `over_water` is item 42B ∈ {waterway codes}.
+
+**The pipeline columns are the point.** `work_proposed` (item 75A) and
+`year_of_improvement` (item 97) are the owner's stated intent; codes 31–33 set
+`replacement_proposed=1`. `bridges_summary.csv` counts per county: poor,
+poor-over-water, state-owned-poor, work-proposed, replacement-proposed. A Poor
+state-owned bridge over water in an Ozark county is the archetype of a future
+bat determination.
+
+Caveats: NBI omits spans under 20 ft; some coordinates are zero placeholders
+(`coord_note=missing`, row kept); the release lags inspection by about a year.
+Parser verified only against the synthetic fixture until the workflow runs —
+column names were written from the FHWA Coding Guide, resolved by trailing item
+number so a rename does not break them, but a real-file check is still owed.
 
 Every stage is idempotent and cached. Re-running fetches only what is new.
 
