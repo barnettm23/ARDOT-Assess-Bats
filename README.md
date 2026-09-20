@@ -39,8 +39,17 @@ python bridges.py 100         # NBI Arkansas file -> data/bridges.csv + data/bri
 python tests/test_bridges.py  # offline checks
 ```
 
-Dispatch the `bridges` workflow to run it on a GitHub runner (`limit=0` for all
-~12,700 rows). See CLAUDE.md, "Stage 4 -- bridges", for the schema.
+Dispatch the `bridges` workflow to run it on a GitHub runner (`limit=0` for the
+full file). See CLAUDE.md, "Stage 4 -- bridges", for the schema.
+
+Measured 2026-09-20 on the NBI 2024 Arkansas file: **12,974 bridges, all 75
+counties**, 5,940 Good / 6,330 Fair / 704 Poor, 92% over water. Computed
+condition agreed with FHWA's own `BRIDGE_CONDITION` on every row. 659 bridges
+are Poor *and* over water; 1,532 carry an owner-declared replacement.
+
+Two caveats: item 75A work-proposed is intent recorded at inspection, not a
+funded programme, and item 97 year-of-improvement is populated on 36 of 12,974
+rows -- so this is a cross-section of the pipeline, never an annual series.
 
 ## Four traps this handles
 
