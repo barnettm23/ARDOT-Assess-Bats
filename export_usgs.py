@@ -43,6 +43,7 @@ SCHEMA = [
     ("waterways", "text", "Named water features crossed, pipe-delimited", ""),
     ("coordinates", "text", "Coordinates ONLY where the document itself states them. Almost always blank -- see README", ""),
     ("coord_format", "text", "Notation of the coordinates column", "decimal_degrees | degrees_minutes_seconds | utm"),
+    ("fap", "text", "Federal Aid Project number, where stated. Links the project to federal funding records", ""),
     ("ce_tier", "integer", "Categorical Exclusion tier", "1 | 2 | 3"),
     ("project_length_mi", "decimal", "Project length in miles, where stated", ""),
     ("bats_listed", "text", "Listed bat species on the IPaC species list, pipe-delimited species codes", "GRBA|IBAT|NLEB|OBEB|TCB|LBB"),
@@ -60,6 +61,8 @@ SCHEMA = [
     ("acres_cleared", "decimal", "Acres of suitable habitat cleared, where stated", ""),
     ("mitigation_usd", "decimal", "In-lieu fee contribution in US dollars. NOT consultant revenue -- see README", ""),
     ("mitigation_ratio", "text", "Mitigation ratios applied, pipe-delimited", ""),
+    ("project_cost_usd", "decimal", "Total project cost in US dollars WHERE STATED. Very sparse -- these are NEPA compliance documents, not cost estimates; see README", ""),
+    ("row_cost_usd", "decimal", "Right-of-way cost in US dollars where stated. Very sparse", ""),
     ("pup_season_restriction", "text", "Seasonal tree-clearing prohibition window, where stated", ""),
     ("source_url", "text", "Permanent URL of the source PDF. Every row is independently verifiable", ""),
     ("sha256", "text", "SHA-256 of the source PDF as fetched. Detects silent replacement upstream", ""),
@@ -119,6 +122,14 @@ THE FOUR THINGS MOST LIKELY TO BE MISREAD
 4. mitigation_usd is an in-lieu fee paid to a conservation fund. No
    consultant or contractor earns it. It is an intensity signal only and must
    not be summed as market size or program cost.
+
+COST FIELDS ARE NEARLY EMPTY, AND THAT IS THE FINDING
+ARDOT environmental documents are NEPA compliance records, not cost
+estimates. project_cost_usd is populated on {n_cost} of {n_records} records
+and row_cost_usd on {n_row}. The columns are included because the values that
+are there are real, not because the coverage supports analysis. Project cost
+for these jobs has to come from a different source -- ARDOT bid tabulations or
+the STIP, both public.
 
 LOCATION PRECISION
 County is the finest location this source supports. ARDOT environmental
@@ -190,6 +201,8 @@ def main() -> None:
         "n_unresolved": len(records) - len(resolved),
         "n_coords": sum(1 for r in records if r.get("coordinates")),
         "n_county": sum(1 for r in records if r.get("county")),
+        "n_cost": sum(1 for r in records if r.get("project_cost_usd")),
+        "n_row": sum(1 for r in records if r.get("row_cost_usd")),
         "repo": "https://github.com/barnettm23/ARDOT-Assess-Bats",
         "contact": "michael@seismicagency.com",
     }
