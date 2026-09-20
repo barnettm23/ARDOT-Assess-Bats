@@ -63,6 +63,13 @@ jobs:
           key: ardot-pdf-cache-v2-${{ github.run_id }}
           restore-keys: ardot-pdf-cache-v2-
 
+      # Census county codes, fetched not hardcoded. Non-fatal: if the source
+      # moves, county_fips stays blank and parse.py flags it, which is a
+      # visible gap rather than a wrong code joined to the wrong county.
+      - name: County FIPS reference
+        continue-on-error: true
+        run: python fetch_fips.py
+
       - name: Harvest index
         run: python harvest.py
 

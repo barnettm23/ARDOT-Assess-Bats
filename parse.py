@@ -49,7 +49,55 @@ MONTHS = (
 
 RE_JOB = re.compile(r"\b(?:ARDOT\s+)?JOB\s*#?\s*([A-Z0-9]{6})\b", re.I)
 RE_FAP = re.compile(r"\bFAP\s+([A-Z0-9\-()\s]{6,30}?)(?:\s{2,}|\n)", re.I)
-RE_COUNTY = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+County\b")
+# The old pattern took the FIRST "X County" match and trusted it. That put
+# "Job Name" in the county column on 89 of 712 records (from a form header
+# laying out "Job Name | County | Route" as columns), truncated "St. Francis"
+# to "Francis" on 4, and accepted "Coahoma" -- a Mississippi county mentioned
+# across the state line. 102 of 712 rows carried something that is not an
+# Arkansas county.
+#
+# Now: find every candidate, keep the first that is really an Arkansas county.
+# The optional "St." prefix is what rescues St. Francis; \s+ rather than \s
+# absorbs the newlines pdftotext leaves inside a name ("Little\nRiver").
+RE_COUNTY = re.compile(
+    r"\b((?:St\.?\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+Count(?:y|ies)\b"
+)
+
+# Names only. FIPS codes are joined from data/ar_county_fips.csv, which
+# fetch_fips.py pulls from Census -- see the reasoning there for why they are
+# not written out here.
+ARKANSAS_COUNTIES = {
+    "Arkansas", "Ashley", "Baxter", "Benton", "Boone", "Bradley", "Calhoun",
+    "Carroll", "Chicot", "Clark", "Clay", "Cleburne", "Cleveland", "Columbia",
+    "Conway", "Craighead", "Crawford", "Crittenden", "Cross", "Dallas", "Desha",
+    "Drew", "Faulkner", "Franklin", "Fulton", "Garland", "Grant", "Greene",
+    "Hempstead", "Hot Spring", "Howard", "Independence", "Izard", "Jackson",
+    "Jefferson", "Johnson", "Lafayette", "Lawrence", "Lee", "Lincoln",
+    "Little River", "Logan", "Lonoke", "Madison", "Marion", "Miller",
+    "Mississippi", "Monroe", "Montgomery", "Nevada", "Newton", "Ouachita",
+    "Perry", "Phillips", "Pike", "Poinsett", "Polk", "Pope", "Prairie",
+    "Pulaski", "Randolph", "St. Francis", "Saline", "Scott", "Searcy",
+    "Sebastian", "Sevier", "Sharp", "Stone", "Union", "Van Buren", "Washington",
+    "White", "Woodruff", "Yell",
+}
+
+# Location detail short of coordinates. ARDOT names projects by route and by
+# the feature crossed -- "Little Piney Creek Str. & Apprs., Hwy 56" -- which
+# with a county is enough to place a bridge project precisely by hand.
+RE_ROUTE = re.compile(r"\b(?:Hwy|Highway|Rte|Route)\.?\s*(\d{1,3}[A-Za-z]?)\b", re.I)
+RE_WATERWAY = re.compile(
+    r"\b((?:[A-Z][A-Za-z'\-]+\s+){1,3}"
+    r"(?:Creek|River|Bayou|Branch|Slough|Ditch|Fork|Lake))\b"
+)
+
+# Do these documents carry coordinates at all? Asserted "no" from two documents
+# read months ago; these patterns settle it across the whole corpus instead.
+# Bounds are Arkansas: roughly 33.0-36.5 N, 89.6-94.6 W.
+RE_DECIMAL_DEG = re.compile(r"\b(3[3-6]\.\d{3,})\s*[,\s]\s*(-?9[0-4]\.\d{3,})\b")
+RE_DMS = re.compile(
+    r"\b(\d{1,3})\s*[°d]\s*(\d{1,2})\s*['m]\s*([\d.]+)\s*[\"s]?\s*([NSEW])\b", re.I
+)
+RE_UTM = re.compile(r"\bUTM\b[^.]{0,80}?\b(\d{6})\b[\s,]+\b(\d{7})\b", re.I)
 RE_DATE = re.compile(rf"\b({MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})\b")
 # Tier 3 cover pages carry a month and year with no day ("July 2022", job
 # 050475). Fallback only: the full date above wins wherever a document has one.
@@ -179,6 +227,11 @@ class Record:
     doc_date: str = ""
     doc_year: str = ""
     county: str = ""
+    county_fips: str = ""   # Census code, joined from data/ar_county_fips.csv
+    routes: str = ""        # pipe-delimited highway numbers named in the document
+    waterways: str = ""     # pipe-delimited named features crossed
+    coordinates: str = ""   # only if the document actually states them
+    coord_format: str = ""  # decimal_degrees / degrees_minutes_seconds / utm
     fap: str = ""
     ce_tier: str = ""
     project_length_mi: str = ""
@@ -257,6 +310,49 @@ def _apply(det: Determination, code: str, verdict: str, how: str) -> None:
         return  # LAA found anywhere outranks a weaker verdict of the same kind
     det.verdicts[code] = verdict
     det.source[code] = how
+
+
+def load_county_fips() -> dict:
+    """county name -> FIPS, from the Census-derived file. Empty if absent."""
+    path = ROOT / "data" / "ar_county_fips.csv"
+    if not path.exists():
+        return {}
+    with path.open(newline="", encoding="utf-8") as fh:
+        return {r["county"]: r["county_fips"] for r in csv.DictReader(fh)}
+
+
+COUNTY_FIPS = load_county_fips()
+
+
+def county_of(body: str) -> tuple[str, list[str]]:
+    """First named county that is actually in Arkansas, plus what was rejected.
+
+    Returns ("", rejects) when nothing matches. A blank county is a visible
+    gap; "Job Name" in a county column is an invisible error that travels.
+    """
+    rejected = []
+    for m in RE_COUNTY.finditer(body):
+        name = " ".join(m.group(1).split())          # collapse embedded newlines
+        if name.startswith("St ") or name.startswith("St. "):
+            name = "St. " + name.split(None, 1)[1]   # normalise "St Francis"
+        if name in ARKANSAS_COUNTIES:
+            return name, rejected
+        if name not in rejected:
+            rejected.append(name)
+    return "", rejected
+
+
+def coordinates_of(body: str) -> tuple[str, str]:
+    """Any coordinates in the document, and which notation they were in."""
+    if m := RE_DECIMAL_DEG.search(body):
+        lon = m.group(2)
+        lon = lon if lon.startswith("-") else f"-{lon}"
+        return f"{m.group(1)},{lon}", "decimal_degrees"
+    if m := RE_DMS.search(body):
+        return m.group(0).strip(), "degrees_minutes_seconds"
+    if m := RE_UTM.search(body):
+        return f"{m.group(1)},{m.group(2)}", "utm"
+    return "", ""
 
 
 def survey_signals(body: str) -> tuple[list[str], str, list[str]]:
@@ -375,10 +471,21 @@ def parse_one(pdf: Path, meta: dict) -> tuple[Record, list[dict]]:
     else:
         notes.append("no-date")
 
-    if m := RE_COUNTY.search(body):
-        rec.county = m.group(1)
+    rec.county, county_rejects = county_of(body)
+    if rec.county:
+        rec.county_fips = COUNTY_FIPS.get(rec.county, "")
+        if not rec.county_fips:
+            notes.append("no-county-fips")
     else:
         notes.append("no-county")
+        if county_rejects:
+            notes.append(f"county-rejected:{','.join(county_rejects[:3])}")
+
+    rec.routes = "|".join(dict.fromkeys(RE_ROUTE.findall(body)))
+    rec.waterways = "|".join(
+        dict.fromkeys(" ".join(w.split()) for w in RE_WATERWAY.findall(body))
+    )[:200]
+    rec.coordinates, rec.coord_format = coordinates_of(body)
 
     if m := RE_FAP.search(body):
         rec.fap = " ".join(m.group(1).split())
